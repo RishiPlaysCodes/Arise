@@ -17,6 +17,8 @@ export default function OnboardingScreen() {
   const [form, setForm] = useState({
     hunterName: '', heightCm: '', currentWeightKg: '', age: '', gender: 'male',
     activityLevel: 'sedentary', targetBodyType: '', bodyFatPercentage: '',
+    experience: 'beginner',
+    neck: '', waist: '', hip: '', wrist: '', ankle: '',
   });
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -29,6 +31,7 @@ export default function OnboardingScreen() {
     setError('');
     try {
       await createHunter(form.hunterName || 'Hunter');
+      const num = (v) => (v ? parseFloat(v) : undefined);
       const res = await setupBody({
         heightCm: parseFloat(form.heightCm),
         currentWeightKg: parseFloat(form.currentWeightKg),
@@ -36,7 +39,13 @@ export default function OnboardingScreen() {
         gender: form.gender,
         activityLevel: form.activityLevel,
         targetBodyType: form.targetBodyType,
-        bodyFatPercentage: form.bodyFatPercentage ? parseFloat(form.bodyFatPercentage) : undefined,
+        bodyFatPercentage: num(form.bodyFatPercentage),
+        experience: form.experience,
+        neckCm: num(form.neck),
+        waistCm: num(form.waist),
+        hipCm: num(form.hip),
+        wristCm: num(form.wrist),
+        ankleCm: num(form.ankle),
       });
       setPlan(res.plan);
       setStep(4);
@@ -103,6 +112,32 @@ export default function OnboardingScreen() {
                 {Object.entries(ACTIVITY_LEVELS).map(([k, v]) => (
                   <SelectRow key={k} active={form.activityLevel === k} title={v.name} desc={v.description} onPress={() => set('activityLevel', k)} />
                 ))}
+
+                <Text style={[styles.label, { marginTop: spacing.md }]}>Training Experience</Text>
+                <View style={styles.row}>
+                  {[['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced']].map(([k, l]) => (
+                    <Chip key={k} active={form.experience === k} label={l} onPress={() => set('experience', k)} />
+                  ))}
+                </View>
+                <Text style={styles.helper}>Sets realistic muscle-gain speed (novices gain much faster).</Text>
+
+                {/* Optional precision data */}
+                <View style={styles.precisionHead}>
+                  <MaterialCommunityIcons name="target" size={14} color={colors.cyan} />
+                  <Text style={styles.precisionTitle}>Precision Data (optional, boosts accuracy)</Text>
+                </View>
+                <Text style={styles.helper}>
+                  Tape measurements unlock the accurate US-Navy body-fat method and your natural
+                  muscular potential. Skip if you don't have a tape — you can add these later.
+                </Text>
+                <View style={styles.measureGrid}>
+                  <MiniField label="Neck (cm)" value={form.neck} onChange={(v) => set('neck', v)} />
+                  <MiniField label="Waist (cm)" value={form.waist} onChange={(v) => set('waist', v)} />
+                  {form.gender === 'female' && <MiniField label="Hip (cm)" value={form.hip} onChange={(v) => set('hip', v)} />}
+                  <MiniField label="Wrist (cm)" value={form.wrist} onChange={(v) => set('wrist', v)} />
+                  <MiniField label="Ankle (cm)" value={form.ankle} onChange={(v) => set('ankle', v)} />
+                </View>
+
                 {!!error && <Text style={styles.error}>{error}</Text>}
                 <View style={styles.navRow}>
                   <OutlineButton title="Back" onPress={back} style={{ flex: 1 }} />
@@ -198,6 +233,15 @@ function Field({ label, value, onChange, keyboardType, placeholder }) {
   );
 }
 
+function MiniField({ label, value, onChange }) {
+  return (
+    <View style={styles.miniField}>
+      <Text style={styles.miniLabel}>{label}</Text>
+      <TextInput style={styles.miniInput} value={value} onChangeText={onChange} keyboardType="numeric" placeholder="--" placeholderTextColor={colors.textMuted} />
+    </View>
+  );
+}
+
 function Chip({ active, label, onPress }) {
   return (
     <TouchableOpacity onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
@@ -261,4 +305,11 @@ const styles = StyleSheet.create({
   reviewValue: { color: colors.text, fontWeight: '700', fontSize: font.small, textTransform: 'capitalize' },
   error: { color: colors.red, fontSize: font.small, marginTop: spacing.sm, textAlign: 'center' },
   enterNote: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.md, fontSize: font.small },
+  helper: { color: colors.textMuted, fontSize: font.tiny, marginTop: 4, lineHeight: 15 },
+  precisionHead: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.lg },
+  precisionTitle: { color: colors.cyan, fontSize: font.small, fontWeight: '700' },
+  measureGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.sm },
+  miniField: { width: '30%', flexGrow: 1 },
+  miniLabel: { color: colors.textMuted, fontSize: font.tiny, marginBottom: 3 },
+  miniInput: { backgroundColor: colors.bgDarker, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 8, color: colors.text },
 });

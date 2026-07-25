@@ -7,6 +7,7 @@ import { initDatabase } from '../db/database';
 import {
   ProfileRepo, QuestRepo, DietRepo, StepRepo, ActivityRepo,
   CombatRepo, PunishmentRepo, DayProcessor,
+  MeasurementRepo, CheckinRepo, WaterRepo, SleepRepo, SettingsRepo, AchievementRepo,
 } from '../db/repositories';
 import PedometerService from '../services/pedometer';
 import NotificationService from '../services/notifications';
@@ -35,17 +36,28 @@ export function AppProvider({ children }) {
     return { profile: p, body: b };
   }, []);
 
+  const [newAchievements, setNewAchievements] = useState([]);
+
   // Handle level-up feedback surfaced from any repo action
   const handleRewards = useCallback(async (rewards) => {
-    if (!rewards) return;
-    const arr = Array.isArray(rewards) ? rewards : [rewards];
-    for (const r of arr) {
-      const info = r?.levelInfo;
-      if (info?.leveledUp) {
-        setPendingLevelUp({ level: info.newLevel, rank: info.newRank });
-        await NotificationService.notifyLevelUp(info.newLevel, info.newRank);
+    if (rewards) {
+      const arr = Array.isArray(rewards) ? rewards : [rewards];
+      for (const r of arr) {
+        const info = r?.levelInfo;
+        if (info?.leveledUp) {
+          setPendingLevelUp({ level: info.newLevel, rank: info.newRank });
+          await NotificationService.notifyLevelUp(info.newLevel, info.newRank);
+        }
       }
     }
+    // Evaluate achievements after any progress event
+    try {
+      const earned = await AchievementRepo.check();
+      if (earned.length) {
+        setNewAchievements(earned);
+        for (const a of earned) await NotificationService.notifyNow('Achievement Unlocked', `${a.name} — ${a.desc}`);
+      }
+    } catch (e) { /* noop */ }
     await refreshCore();
   }, [refreshCore]);
 
@@ -111,8 +123,12 @@ export function AppProvider({ children }) {
     ready, profile, stats, body, punishmentStatus, pedometerAvailable,
     pendingLevelUp, clearLevelUp: () => setPendingLevelUp(null),
     bootstrap, refreshCore, handleRewards, createHunter, setupBody,
+    newAchievements, clearAchievements: () => setNewAchievements([]),
     // expose repos for screens
-    repos: { ProfileRepo, QuestRepo, DietRepo, StepRepo, ActivityRepo, CombatRepo, PunishmentRepo, DayProcessor },
+    repos: {
+      ProfileRepo, QuestRepo, DietRepo, StepRepo, ActivityRepo, CombatRepo, PunishmentRepo, DayProcessor,
+      MeasurementRepo, CheckinRepo, WaterRepo, SleepRepo, SettingsRepo, AchievementRepo,
+    },
     services: { PedometerService, NotificationService, SyncService },
   };
 

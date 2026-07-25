@@ -6,6 +6,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useApp } from '../store/AppContext';
 import { colors, font, spacing, radius } from '../theme/theme';
 import { Card, ProgressBar, ScreenTitle, GradientButton, Badge } from '../components/ui';
+import { searchFoods, scaleFood, defaultServing } from '../data/foods';
 
 const MEALS = ['breakfast', 'lunch', 'snack', 'dinner'];
 
@@ -16,6 +17,10 @@ export default function DietScreen() {
   const [showForm, setShowForm] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [form, setForm] = useState({ mealType: 'breakfast', foodName: '', calories: '', protein: '', carbs: '', fats: '' });
+  const [foodQuery, setFoodQuery] = useState('');
+  const [grams, setGrams] = useState('');
+  const [selectedFood, setSelectedFood] = useState(null);
+  const foodResults = searchFoods(foodQuery, 12);
 
   const load = useCallback(async () => {
     const [t, p] = await Promise.all([repos.DietRepo.today(), repos.DietRepo.mealPlan()]);
@@ -39,6 +44,19 @@ export default function DietScreen() {
   };
 
   const remove = async (id) => { const res = await repos.DietRepo.remove(id); await handleRewards(res.rewards); await load(); };
+
+  const quickAddFood = async (food, gramsAmount) => {
+    const amt = gramsAmount || defaultServing(food);
+    const macros = scaleFood(food, amt);
+    const res = await repos.DietRepo.log({
+      mealType: form.mealType, foodName: `${food.name} (${amt}g)`,
+      calories: macros.calories, protein: macros.protein, carbs: macros.carbs, fats: macros.fats,
+      quantity: amt, unit: 'g',
+    });
+    await handleRewards(res.rewards);
+    setFoodQuery(''); setSelectedFood(null); setGrams('');
+    await load();
+  };
 
   const t = today?.totals || {};
   const tg = today?.targets;
@@ -84,6 +102,51 @@ export default function DietScreen() {
             <GradientButton title="Save" onPress={logFood} style={{ marginTop: spacing.sm }} />
           </Card>
         )}
+
+        {/* Quick add from offline food database */}
+        <Card style={{ marginTop: spacing.md }}>
+          <View style={styles.cardHeader}>
+            <MaterialCommunityIcons name="database-search" size={18} color={colors.green} />
+            <Text style={styles.cardTitle}>Quick Add (Food Database)</Text>
+          </View>
+          <View style={styles.chipRow}>
+            {MEALS.map((m) => (
+              <TouchableOpacity key={m} onPress={() => setForm((f) => ({ ...f, mealType: m }))} style={[styles.chip, form.mealType === m && styles.chipActive]}>
+                <Text style={[styles.chipText, form.mealType === m && { color: colors.purpleLight }]}>{m}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TextInput
+            style={styles.input} placeholder="Search foods (e.g. chicken, rice, banana)"
+            placeholderTextColor={colors.textMuted} value={foodQuery} onChangeText={(v) => { setFoodQuery(v); setSelectedFood(null); }}
+          />
+          {foodQuery.length > 0 && (
+            <View style={styles.foodResults}>
+              {foodResults.map((food, i) => {
+                const isSel = selectedFood?.name === food.name;
+                const per = scaleFood(food, defaultServing(food));
+                return (
+                  <View key={i}>
+                    <TouchableOpacity style={styles.foodRow} onPress={() => { setSelectedFood(food); setGrams(String(defaultServing(food))); }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.foodName}>{food.name}</Text>
+                        <Text style={styles.foodMacros}>{per.calories}cal · P{per.protein} · C{per.carbs} · F{per.fats} /{defaultServing(food)}g</Text>
+                      </View>
+                      <MaterialCommunityIcons name={isSel ? 'chevron-up' : 'plus-circle-outline'} size={20} color={colors.green} />
+                    </TouchableOpacity>
+                    {isSel && (
+                      <View style={styles.gramsRow}>
+                        <TextInput style={styles.gramsInput} keyboardType="numeric" value={grams} onChangeText={setGrams} placeholder="grams" placeholderTextColor={colors.textMuted} />
+                        <GradientButton title="Add" onPress={() => quickAddFood(food, parseFloat(grams) || defaultServing(food))} colors={[colors.green, colors.emerald]} />
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+              {foodResults.length === 0 && <Text style={styles.empty}>No match. Use "Log Food" for a custom entry.</Text>}
+            </View>
+          )}
+        </Card>
 
         {/* Today's log */}
         <Card style={{ marginTop: spacing.md }}>
@@ -170,6 +233,12 @@ const styles = StyleSheet.create({
   mealName: { color: colors.text, fontWeight: '600', fontSize: font.small, flexShrink: 1 },
   mealMacros: { color: colors.textMuted, fontSize: font.tiny, marginTop: 3 },
   empty: { color: colors.textMuted, textAlign: 'center', paddingVertical: spacing.md, fontSize: font.small },
+  foodResults: { marginTop: spacing.sm },
+  foodRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  foodName: { color: colors.text, fontSize: font.small, fontWeight: '600' },
+  foodMacros: { color: colors.textMuted, fontSize: font.tiny, marginTop: 2 },
+  gramsRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.sm },
+  gramsInput: { flex: 1, backgroundColor: colors.bgDarker, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, color: colors.text },
   planRow: { paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   planHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   planTime: { color: colors.textMuted, fontSize: font.tiny },

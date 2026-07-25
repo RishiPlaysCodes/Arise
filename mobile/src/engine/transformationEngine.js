@@ -5,6 +5,7 @@
 // ============================================================================
 
 import { BODY_TYPES, ACTIVITY_LEVELS } from './constants';
+import BodyMetrics from './bodyMetrics';
 
 export const TransformationEngine = {
   calculateBMR(weightKg, heightCm, age, gender) {
@@ -57,7 +58,10 @@ export const TransformationEngine = {
   },
 
   generateTransformationPlan(profile) {
-    const { heightCm, currentWeightKg, age, gender, activityLevel, targetBodyType, bodyFatPercentage } = profile;
+    const {
+      heightCm, currentWeightKg, age, gender, activityLevel, targetBodyType,
+      bodyFatPercentage, experience = 'beginner',
+    } = profile;
     const bodyType = BODY_TYPES[targetBodyType] || BODY_TYPES.lean_athletic;
 
     const bmr = bodyFatPercentage
@@ -68,18 +72,38 @@ export const TransformationEngine = {
     const estimatedBF = bodyFatPercentage || this.estimateBodyFat(gender, currentWeightKg, heightCm, age);
     const targetWeight = this.calculateTargetWeight(heightCm, gender, targetBodyType);
     const targetBF = bodyType.targetBodyFat[gender] ?? bodyType.targetBodyFat.male;
+    const comp = BodyMetrics.bodyComposition(currentWeightKg, estimatedBF);
+    const leanMassKg = comp?.leanMassKg;
 
     const weightDiff = targetWeight - currentWeightKg;
     const losing = weightDiff < -0.5;
     const gaining = weightDiff > 0.5;
-    const weeklyRate = losing ? -0.7 : gaining ? 0.35 : 0;
+
+    // Realistic, evidence-based rates (not naive fixed numbers):
+    //  - fat loss scales with current body fat (leaner = slower to keep muscle)
+    //  - muscle gain scales with training age (novice fast, advanced slow)
+    let weeklyRate;
+    if (losing) {
+      weeklyRate = -BodyMetrics.weeklyFatLossKg(currentWeightKg, estimatedBF, gender);
+    } else if (gaining) {
+      const monthly = BodyMetrics.monthlyMuscleGainKg(experience, gender);
+      // Lean-bulk: muscle gain + a small fat allowance (~40% extra mass)
+      weeklyRate = Math.max(0.15, (monthly / 4.33) * 1.4);
+    } else {
+      weeklyRate = 0;
+    }
     const weeksToGoal = weeklyRate !== 0 ? Math.ceil(Math.abs(weightDiff) / Math.abs(weeklyRate)) : 12;
     const daysToGoal = weeksToGoal * 7;
 
-    let dailyCalories = losing ? tdee - 500 : gaining ? tdee + 300 : tdee;
+    // Calorie target from energy balance of the chosen rate.
+    const dailyDelta = (Math.abs(weeklyRate) * BodyMetrics.CONSTANTS.KCAL_PER_KG) / 7;
+    let dailyCalories = losing ? tdee - dailyDelta : gaining ? tdee + dailyDelta : tdee;
     dailyCalories = Math.max(dailyCalories, gender === 'male' ? 1500 : 1200); // safety floor
 
     const macros = this.calculateMacros(dailyCalories, currentWeightKg, targetBodyType, losing);
+    // Prefer lean-mass-based protein + bodyweight-based water for accuracy
+    const proteinG = BodyMetrics.proteinTargetG(currentWeightKg, leanMassKg, losing ? 'cut' : gaining ? 'bulk' : 'recomp');
+    const waterL = BodyMetrics.waterTargetLiters(currentWeightKg, activityLevel);
     const phases = this.generatePhases(weightDiff, estimatedBF, targetBF, daysToGoal);
     const dailyStepTarget = this.calculateDailyStepTarget(activityLevel, targetBodyType);
     const trainingSplit = this.generateTrainingSplit(targetBodyType);
@@ -91,6 +115,7 @@ export const TransformationEngine = {
         bmr: Math.round(bmr),
         tdee: Math.round(tdee),
         estimatedBodyFat: Math.round(estimatedBF * 10) / 10,
+        leanMassKg: leanMassKg || null,
       },
       targets: {
         weight: targetWeight, bodyFat: targetBF, bodyType: bodyType.name,
@@ -98,8 +123,8 @@ export const TransformationEngine = {
       },
       nutrition: {
         dailyCalories: Math.round(dailyCalories),
-        protein: macros.protein, carbs: macros.carbs, fats: macros.fats,
-        fiber: macros.fiber, water: macros.water,
+        protein: Math.max(proteinG, macros.protein - 20), carbs: macros.carbs, fats: macros.fats,
+        fiber: macros.fiber, water: waterL,
       },
       training: { dailyStepTarget, trainingSplit, phases },
       weeklyRate: Math.round(weeklyRate * 100) / 100,

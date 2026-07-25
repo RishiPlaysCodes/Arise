@@ -181,13 +181,68 @@ export async function initDatabase() {
       synced INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS body_measurements (
+      id TEXT PRIMARY KEY,
+      log_date TEXT NOT NULL,
+      neck_cm REAL, chest_cm REAL, waist_cm REAL, hip_cm REAL,
+      left_bicep_cm REAL, right_bicep_cm REAL, forearm_cm REAL,
+      left_thigh_cm REAL, right_thigh_cm REAL, calf_cm REAL,
+      shoulder_cm REAL, wrist_cm REAL, ankle_cm REAL,
+      body_fat_percentage REAL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS checkins (
+      id TEXT PRIMARY KEY,
+      checkin_date TEXT NOT NULL,
+      empirical_maintenance INTEGER,
+      formula_tdee INTEGER,
+      used_maintenance INTEGER,
+      confidence TEXT,
+      days_of_data INTEGER,
+      observed_weekly_rate REAL,
+      new_calorie_target INTEGER,
+      projected_weeks INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS progress_photos (
+      id TEXT PRIMARY KEY,
+      log_date TEXT NOT NULL,
+      uri TEXT NOT NULL,
+      pose TEXT DEFAULT 'front',
+      weight_kg REAL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS sleep_logs (
+      log_date TEXT PRIMARY KEY,
+      hours REAL DEFAULT 0,
+      quality TEXT,
+      last_updated TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS water_logs (
+      log_date TEXT PRIMARY KEY,
+      liters REAL DEFAULT 0,
+      last_updated TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_quests_date ON daily_quests(quest_date);
     CREATE INDEX IF NOT EXISTS idx_diet_date ON diet_logs(log_date);
     CREATE INDEX IF NOT EXISTS idx_activity_date ON activity_logs(log_date);
     CREATE INDEX IF NOT EXISTS idx_combat_date ON combat_training(log_date);
     CREATE INDEX IF NOT EXISTS idx_punish_active ON punishments(is_active);
     CREATE INDEX IF NOT EXISTS idx_weight_date ON weight_history(log_date);
+    CREATE INDEX IF NOT EXISTS idx_measure_date ON body_measurements(log_date);
   `);
+
+  await runMigrations(db);
 
   // Ensure singleton stats row exists
   const stats = await db.getFirstAsync('SELECT id FROM player_stats WHERE id = 1');
@@ -195,6 +250,27 @@ export async function initDatabase() {
     await db.runAsync('INSERT INTO player_stats (id) VALUES (1)');
   }
   return db;
+}
+
+// Additive, idempotent column migrations for existing installs.
+async function runMigrations(db) {
+  const cols = await db.getAllAsync("PRAGMA table_info(body_profile)");
+  const existing = new Set(cols.map((c) => c.name));
+  const additions = [
+    ['neck_cm', 'REAL'], ['waist_cm', 'REAL'], ['hip_cm', 'REAL'],
+    ['wrist_cm', 'REAL'], ['ankle_cm', 'REAL'],
+    ['experience', "TEXT DEFAULT 'beginner'"],
+    ['dietary_prefs', "TEXT DEFAULT '[]'"],
+    ['bf_method', "TEXT DEFAULT 'estimated'"],
+    ['adaptive_maintenance', 'INTEGER'],
+    ['natural_potential_kg', 'REAL'],
+    ['goal_direction', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!existing.has(name)) {
+      try { await db.execAsync(`ALTER TABLE body_profile ADD COLUMN ${name} ${type};`); } catch (e) { /* already exists */ }
+    }
+  }
 }
 
 // Utility: generate a lightweight unique id (no external dep, offline-safe)
@@ -213,7 +289,9 @@ export async function resetDatabase() {
     DELETE FROM diet_logs; DELETE FROM step_logs; DELETE FROM activity_logs;
     DELETE FROM combat_training; DELETE FROM punishments; DELETE FROM blocked_apps;
     DELETE FROM weight_history; DELETE FROM achievements; DELETE FROM day_processed;
-    DELETE FROM sync_queue; UPDATE player_stats SET strength=10, agility=10, endurance=10,
+    DELETE FROM sync_queue; DELETE FROM body_measurements; DELETE FROM checkins;
+    DELETE FROM progress_photos; DELETE FROM settings; DELETE FROM sleep_logs; DELETE FROM water_logs;
+    UPDATE player_stats SET strength=10, agility=10, endurance=10,
     vitality=10, discipline=10, combat_power=10, intelligence=10, perception=10, stat_points_available=0 WHERE id=1;
   `);
 }

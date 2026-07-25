@@ -6,6 +6,8 @@
 import { getDB, uid } from './database';
 import TransformationEngine from '../engine/transformationEngine';
 import CombatEngine from '../engine/combatEngine';
+import BodyMetrics from '../engine/bodyMetrics';
+import AdaptiveEngine from '../engine/adaptiveEngine';
 import {
   getXPForLevel, getRankFromLevel, RANKS, todayStr,
   PUNISHMENT_TYPES, SOCIAL_MEDIA_APPS, ENTERTAINMENT_APPS,
@@ -52,29 +54,46 @@ export const ProfileRepo = {
     const {
       heightCm, currentWeightKg, age, gender, activityLevel,
       targetBodyType, bodyFatPercentage,
+      neckCm, waistCm, hipCm, wristCm, ankleCm,
+      experience = 'beginner', dietaryPrefs = [],
     } = input;
+
+    // Prefer the accurate US Navy tape body-fat when measurements are provided.
+    const navyBF = BodyMetrics.navyBodyFat({ gender, heightCm, neckCm, waistCm, hipCm });
+    const effectiveBF = bodyFatPercentage || navyBF || null;
+    const bfMethod = bodyFatPercentage ? 'user' : navyBF ? 'navy' : 'estimated';
 
     const plan = TransformationEngine.generateTransformationPlan({
       heightCm, currentWeightKg, age, gender,
-      activityLevel: activityLevel || 'sedentary', targetBodyType, bodyFatPercentage,
+      activityLevel: activityLevel || 'sedentary', targetBodyType,
+      bodyFatPercentage: effectiveBF, experience,
+    });
+
+    // Natural muscular potential (Casey Butt) when wrist+ankle provided.
+    const potential = BodyMetrics.naturalPotential({
+      heightCm, wristCm, ankleCm, targetBodyFat: plan.targets.bodyFat, gender,
     });
 
     const bmi = TransformationEngine.calculateBMI(currentWeightKg, heightCm);
-    const bmr = bodyFatPercentage
-      ? TransformationEngine.calculateBMRKatchMcArdle(currentWeightKg, bodyFatPercentage)
+    const bmr = effectiveBF
+      ? TransformationEngine.calculateBMRKatchMcArdle(currentWeightKg, effectiveBF)
       : TransformationEngine.calculateBMR(currentWeightKg, heightCm, age, gender);
     const tdee = TransformationEngine.calculateTDEE(bmr, activityLevel || 'sedentary');
 
     const existing = await this.getBody();
+    const storedBF = effectiveBF || plan.currentStats.estimatedBodyFat;
     const params = [
       heightCm, currentWeightKg, plan.targets.weight,
-      bodyFatPercentage || plan.currentStats.estimatedBodyFat, plan.targets.bodyFat,
+      storedBF, plan.targets.bodyFat,
       age, gender, activityLevel || 'sedentary', targetBodyType,
       Math.round(bmi * 10) / 10, Math.round(bmr), Math.round(tdee),
       plan.targets.estimatedDays,
       plan.nutrition.dailyCalories, plan.nutrition.protein, plan.nutrition.carbs,
       plan.nutrition.fats, plan.nutrition.fiber, plan.nutrition.water,
       plan.training.dailyStepTarget,
+      neckCm ?? null, waistCm ?? null, hipCm ?? null, wristCm ?? null, ankleCm ?? null,
+      experience, JSON.stringify(dietaryPrefs || []), bfMethod,
+      potential?.maxLeanBodyMassKg ?? null, plan.direction,
     ];
 
     if (existing) {
@@ -83,7 +102,9 @@ export const ProfileRepo = {
          body_fat_percentage=?, target_body_fat=?, age=?, gender=?, activity_level=?,
          target_body_type=?, bmi=?, bmr=?, tdee=?, estimated_days_to_goal=?,
          daily_calories=?, protein_g=?, carbs_g=?, fats_g=?, fiber_g=?, water_liters=?,
-         daily_step_target=?, updated_at=datetime('now') WHERE id=1`,
+         daily_step_target=?, neck_cm=?, waist_cm=?, hip_cm=?, wrist_cm=?, ankle_cm=?,
+         experience=?, dietary_prefs=?, bf_method=?, natural_potential_kg=?, goal_direction=?,
+         updated_at=datetime('now') WHERE id=1`,
         params
       );
     } else {
@@ -91,19 +112,27 @@ export const ProfileRepo = {
         `INSERT INTO body_profile (id, height_cm, current_weight_kg, target_weight_kg,
          body_fat_percentage, target_body_fat, age, gender, activity_level, target_body_type,
          bmi, bmr, tdee, estimated_days_to_goal, daily_calories, protein_g, carbs_g, fats_g,
-         fiber_g, water_liters, daily_step_target)
-         VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         fiber_g, water_liters, daily_step_target, neck_cm, waist_cm, hip_cm, wrist_cm, ankle_cm,
+         experience, dietary_prefs, bf_method, natural_potential_kg, goal_direction)
+         VALUES (1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         params
       );
     }
 
-    // Log initial weight
+    // Log initial weight (+ body fat) and initial measurements if provided.
     await db.runAsync(
       `INSERT INTO weight_history (id, log_date, weight_kg, body_fat_percentage) VALUES (?,?,?,?)`,
-      [uid(), todayStr(), currentWeightKg, bodyFatPercentage || null]
+      [uid(), todayStr(), currentWeightKg, storedBF || null]
     );
+    if (neckCm || waistCm || hipCm || wristCm || ankleCm) {
+      await db.runAsync(
+        `INSERT INTO body_measurements (id, log_date, neck_cm, waist_cm, hip_cm, wrist_cm, ankle_cm, body_fat_percentage)
+         VALUES (?,?,?,?,?,?,?,?)`,
+        [uid(), todayStr(), neckCm ?? null, waistCm ?? null, hipCm ?? null, wristCm ?? null, ankleCm ?? null, storedBF || null]
+      );
+    }
 
-    return { plan, body: await this.getBody() };
+    return { plan, body: await this.getBody(), potential, navyBF };
   },
 
   async getTransformationPlan() {
@@ -113,6 +142,16 @@ export const ProfileRepo = {
       heightCm: body.height_cm, currentWeightKg: body.current_weight_kg,
       age: body.age, gender: body.gender, activityLevel: body.activity_level,
       targetBodyType: body.target_body_type, bodyFatPercentage: body.body_fat_percentage,
+      experience: body.experience || 'beginner',
+    });
+  },
+
+  async getNaturalPotential() {
+    const body = await this.getBody();
+    if (!body || !body.wrist_cm || !body.ankle_cm) return null;
+    return BodyMetrics.naturalPotential({
+      heightCm: body.height_cm, wristCm: body.wrist_cm, ankleCm: body.ankle_cm,
+      targetBodyFat: body.target_body_fat || 10, gender: body.gender,
     });
   },
 
@@ -705,4 +744,253 @@ export const DayProcessor = {
     }
     return results;
   },
+};
+
+
+// ---------------------------------------------------------------------------
+// MEASUREMENTS - circumference tracking over time (accurate progress signal)
+// ---------------------------------------------------------------------------
+export const MeasurementRepo = {
+  async log(m) {
+    const db = await getDB();
+    await db.runAsync(
+      `INSERT INTO body_measurements (id, log_date, neck_cm, chest_cm, waist_cm, hip_cm,
+        left_bicep_cm, right_bicep_cm, forearm_cm, left_thigh_cm, right_thigh_cm, calf_cm,
+        shoulder_cm, wrist_cm, ankle_cm, body_fat_percentage)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        uid(), todayStr(), m.neck ?? null, m.chest ?? null, m.waist ?? null, m.hip ?? null,
+        m.leftBicep ?? null, m.rightBicep ?? null, m.forearm ?? null, m.leftThigh ?? null,
+        m.rightThigh ?? null, m.calf ?? null, m.shoulder ?? null, m.wrist ?? null,
+        m.ankle ?? null, m.bodyFat ?? null,
+      ]
+    );
+
+    // If neck+waist(+hip) present, recompute Navy body fat and persist to profile.
+    const body = await ProfileRepo.getBody();
+    if (body && m.neck && m.waist && (body.gender === 'male' || m.hip)) {
+      const bf = BodyMetrics.navyBodyFat({
+        gender: body.gender, heightCm: body.height_cm,
+        neckCm: m.neck, waistCm: m.waist, hipCm: m.hip,
+      });
+      if (bf) {
+        const db2 = await getDB();
+        await db2.runAsync(
+          "UPDATE body_profile SET body_fat_percentage=?, bf_method='navy', neck_cm=?, waist_cm=?, hip_cm=COALESCE(?,hip_cm), updated_at=datetime('now') WHERE id=1",
+          [bf, m.neck, m.waist, m.hip ?? null]
+        );
+      }
+    }
+    return this.latest();
+  },
+
+  async latest() {
+    const db = await getDB();
+    return db.getFirstAsync('SELECT * FROM body_measurements ORDER BY log_date DESC, created_at DESC LIMIT 1');
+  },
+
+  async history(limit = 60) {
+    const db = await getDB();
+    return db.getAllAsync('SELECT * FROM body_measurements ORDER BY log_date DESC LIMIT ?', [limit]);
+  },
+
+  // Compare latest vs oldest to show change per site.
+  async progress() {
+    const db = await getDB();
+    const rows = await db.getAllAsync('SELECT * FROM body_measurements ORDER BY log_date ASC');
+    if (rows.length < 2) return null;
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    const sites = ['neck_cm', 'chest_cm', 'waist_cm', 'hip_cm', 'left_bicep_cm', 'right_bicep_cm', 'left_thigh_cm', 'calf_cm', 'shoulder_cm'];
+    const deltas = {};
+    for (const s of sites) {
+      if (first[s] != null && last[s] != null) {
+        deltas[s] = Math.round((last[s] - first[s]) * 10) / 10;
+      }
+    }
+    return { first, last, deltas };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// CHECK-IN - weekly adaptive recalibration (self-correcting accuracy)
+// ---------------------------------------------------------------------------
+export const CheckinRepo = {
+  async run(apply = true) {
+    const body = await ProfileRepo.getBody();
+    if (!body) return null;
+    const weights = await ProfileRepo.getWeightHistory(120);
+    const intakeLogs = await DietRepo.dailyIntakeHistory(30);
+    const result = AdaptiveEngine.runCheckin({ body, weights, intakeLogs });
+
+    if (apply && result.newCalorieTarget) {
+      // Recompute macros around the new calorie target, keep protein high.
+      const db = await getDB();
+      const proteinG = BodyMetrics.proteinTargetG(
+        body.current_weight_kg,
+        BodyMetrics.bodyComposition(body.current_weight_kg, body.body_fat_percentage)?.leanMassKg,
+        result.direction
+      );
+      const proteinCals = proteinG * 4;
+      const fatCals = result.newCalorieTarget * 0.25;
+      const fatsG = Math.round(fatCals / 9);
+      const carbsG = Math.max(Math.round((result.newCalorieTarget - proteinCals - fatCals) / 4), 50);
+      await db.runAsync(
+        `UPDATE body_profile SET daily_calories=?, protein_g=?, carbs_g=?, fats_g=?,
+         adaptive_maintenance=?, estimated_days_to_goal=COALESCE(?, estimated_days_to_goal),
+         updated_at=datetime('now') WHERE id=1`,
+        [
+          result.newCalorieTarget, proteinG, carbsG, fatsG,
+          result.empiricalMaintenance ?? null, result.projection?.days ?? null,
+        ]
+      );
+      await db.runAsync(
+        `INSERT INTO checkins (id, checkin_date, empirical_maintenance, formula_tdee, used_maintenance,
+          confidence, days_of_data, observed_weekly_rate, new_calorie_target, projected_weeks)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [
+          uid(), todayStr(), result.empiricalMaintenance ?? null, result.formulaTDEE,
+          result.usedMaintenance, result.confidence, result.daysOfData,
+          result.observedWeeklyRateKg ?? null, result.newCalorieTarget, result.projection?.weeks ?? null,
+        ]
+      );
+    }
+    return result;
+  },
+
+  async last() {
+    const db = await getDB();
+    return db.getFirstAsync('SELECT * FROM checkins ORDER BY created_at DESC LIMIT 1');
+  },
+
+  async history(limit = 20) {
+    const db = await getDB();
+    return db.getAllAsync('SELECT * FROM checkins ORDER BY created_at DESC LIMIT ?', [limit]);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// WATER + SLEEP quick loggers (feed hydration/sleep quests)
+// ---------------------------------------------------------------------------
+export const WaterRepo = {
+  async today() {
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT * FROM water_logs WHERE log_date = ?', [todayStr()]);
+    return row || { log_date: todayStr(), liters: 0 };
+  },
+  async add(liters) {
+    const db = await getDB();
+    const cur = await this.today();
+    const total = Math.round((cur.liters + liters) * 100) / 100;
+    await db.runAsync(
+      `INSERT INTO water_logs (log_date, liters, last_updated) VALUES (?,?,datetime('now'))
+       ON CONFLICT(log_date) DO UPDATE SET liters=?, last_updated=datetime('now')`,
+      [todayStr(), total, total]
+    );
+    const rewards = await QuestRepo.syncCategory('hydration', () => ({ value: total }));
+    return { liters: total, rewards };
+  },
+};
+
+export const SleepRepo = {
+  async today() {
+    const db = await getDB();
+    const row = await db.getFirstAsync('SELECT * FROM sleep_logs WHERE log_date = ?', [todayStr()]);
+    return row || { log_date: todayStr(), hours: 0 };
+  },
+  async set(hours, quality = null) {
+    const db = await getDB();
+    await db.runAsync(
+      `INSERT INTO sleep_logs (log_date, hours, quality, last_updated) VALUES (?,?,?,datetime('now'))
+       ON CONFLICT(log_date) DO UPDATE SET hours=?, quality=?, last_updated=datetime('now')`,
+      [todayStr(), hours, quality, hours, quality]
+    );
+    const rewards = await QuestRepo.syncCategory('sleep', () => ({ value: hours }));
+    return { hours, rewards };
+  },
+};
+
+// ---------------------------------------------------------------------------
+// SETTINGS (key/value)
+// ---------------------------------------------------------------------------
+export const SettingsRepo = {
+  async get(key, fallback = null) {
+    const db = await getDB();
+    const r = await db.getFirstAsync('SELECT value FROM settings WHERE key = ?', [key]);
+    return r ? r.value : fallback;
+  },
+  async set(key, value) {
+    const db = await getDB();
+    await db.runAsync(
+      `INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=?`,
+      [key, String(value), String(value)]
+    );
+  },
+};
+
+// ---------------------------------------------------------------------------
+// ACHIEVEMENTS - unlockable badges. Checked after key events.
+// ---------------------------------------------------------------------------
+const ACHIEVEMENT_DEFS = [
+  { id: 'first_quest', name: 'First Steps', desc: 'Complete your first quest', test: (c) => c.totalQuests >= 1 },
+  { id: 'streak_7', name: 'Week Warrior', desc: '7-day streak', test: (c) => c.streak >= 7 },
+  { id: 'streak_30', name: 'Unbreakable', desc: '30-day streak', test: (c) => c.streak >= 30 },
+  { id: 'streak_100', name: 'Monarch\'s Will', desc: '100-day streak', test: (c) => c.streak >= 100 },
+  { id: 'level_10', name: 'D-Rank Rising', desc: 'Reach Level 10', test: (c) => c.level >= 10 },
+  { id: 'level_25', name: 'C-Rank Hunter', desc: 'Reach Level 25', test: (c) => c.level >= 25 },
+  { id: 'level_50', name: 'B-Rank Elite', desc: 'Reach Level 50', test: (c) => c.level >= 50 },
+  { id: 'level_100', name: 'S-Rank Legend', desc: 'Reach Level 100', test: (c) => c.level >= 100 },
+  { id: 'quests_100', name: 'Century', desc: 'Complete 100 quests total', test: (c) => c.totalQuests >= 100 },
+  { id: 'combat_10', name: 'Fighter', desc: '10 combat sessions', test: (c) => c.combatSessions >= 10 },
+  { id: 'steps_1m', name: 'Marathoner', desc: '1,000,000 lifetime steps', test: (c) => c.lifetimeSteps >= 1000000 },
+];
+
+export const AchievementRepo = {
+  async unlocked() {
+    const db = await getDB();
+    return db.getAllAsync('SELECT * FROM achievements ORDER BY unlocked_at DESC');
+  },
+
+  // Evaluate all achievement conditions; unlock any newly-earned ones.
+  async check() {
+    const db = await getDB();
+    const profile = await ProfileRepo.get();
+    if (!profile) return [];
+    const combat = await db.getFirstAsync('SELECT COUNT(*) c FROM combat_training');
+    const steps = await db.getFirstAsync('SELECT COALESCE(SUM(steps),0) s FROM step_logs');
+    const ctx = {
+      level: profile.level,
+      streak: profile.streak_days,
+      totalQuests: profile.total_quests_completed,
+      combatSessions: combat?.c || 0,
+      lifetimeSteps: steps?.s || 0,
+    };
+    const already = new Set((await this.unlocked()).map((a) => a.id));
+    const newly = [];
+    for (const def of ACHIEVEMENT_DEFS) {
+      if (!already.has(def.id) && def.test(ctx)) {
+        await db.runAsync('INSERT OR IGNORE INTO achievements (id, name, description) VALUES (?,?,?)', [def.id, def.name, def.desc]);
+        newly.push(def);
+      }
+    }
+    return newly;
+  },
+
+  allDefs() {
+    return ACHIEVEMENT_DEFS.map(({ id, name, desc }) => ({ id, name, desc }));
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Extend DietRepo with daily intake history (needed by the adaptive engine).
+// ---------------------------------------------------------------------------
+DietRepo.dailyIntakeHistory = async function (days = 30) {
+  const db = await getDB();
+  const start = new Date();
+  start.setDate(start.getDate() - days);
+  return db.getAllAsync(
+    `SELECT log_date, SUM(calories) as total_calories
+     FROM diet_logs WHERE log_date >= ? GROUP BY log_date ORDER BY log_date ASC`,
+    [todayStr(start)]
+  );
 };

@@ -21,6 +21,7 @@ import StepsScreen from './src/screens/StepsScreen';
 import CombatScreen from './src/screens/CombatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SystemScreen from './src/screens/SystemScreen';
+import ProgressScreen from './src/screens/ProgressScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -37,6 +38,7 @@ const ICONS = {
   Diet: 'food-apple',
   Steps: 'shoe-print',
   Combat: 'boxing-glove',
+  Progress: 'chart-line-variant',
   System: 'skull',
   Profile: 'account',
 };
@@ -66,6 +68,7 @@ function MainTabs() {
       <Tab.Screen name="Diet" component={DietScreen} />
       <Tab.Screen name="Steps" component={StepsScreen} />
       <Tab.Screen name="Combat" component={CombatScreen} />
+      <Tab.Screen name="Progress" component={ProgressScreen} />
       <Tab.Screen name="System" component={SystemScreen} />
       <Tab.Screen name="Profile" component={ProfileScreen} />
     </Tab.Navigator>

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,23 +20,38 @@ const STAT_META = [
 ];
 
 export default function DashboardScreen() {
-  const { profile, stats, body, punishmentStatus, repos, refreshCore } = useApp();
+  const { profile, stats, body, punishmentStatus, repos, refreshCore, handleRewards } = useApp();
   const [data, setData] = useState({ quests: null, steps: null, diet: null });
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
-    const [quests, steps, diet] = await Promise.all([
+    const [quests, steps, diet, water, sleep] = await Promise.all([
       repos.QuestRepo.getToday(),
       repos.StepRepo.today(),
       repos.DietRepo.today(),
+      repos.WaterRepo.today(),
+      repos.SleepRepo.today(),
     ]);
     const completed = quests.filter((q) => q.is_completed).length;
     setData({
       quests: { list: quests, completed, total: quests.length, pct: quests.length ? Math.round((completed / quests.length) * 100) : 0 },
       steps,
       diet,
+      water,
+      sleep,
     });
   }, [repos]);
+
+  const addWater = async (liters) => {
+    const res = await repos.WaterRepo.add(liters);
+    await handleRewards(res.rewards);
+    await load();
+  };
+  const logSleep = async (hours) => {
+    const res = await repos.SleepRepo.set(hours);
+    await handleRewards(res.rewards);
+    await load();
+  };
 
   useFocusEffect(useCallback(() => { load(); refreshCore(); }, [load, refreshCore]));
 
@@ -133,6 +148,36 @@ export default function DashboardScreen() {
           />
         </View>
 
+        {/* Quick log: water + sleep */}
+        <Card style={{ marginTop: spacing.md }}>
+          <View style={styles.cardHeader}>
+            <MaterialCommunityIcons name="lightning-bolt" size={16} color={colors.cyan} />
+            <Text style={styles.cardTitle}>Quick Log</Text>
+          </View>
+          <View style={styles.quickLogRow}>
+            <View style={styles.quickLogCol}>
+              <View style={styles.quickLogLabelRow}>
+                <MaterialCommunityIcons name="cup-water" size={14} color={colors.blueGlow} />
+                <Text style={styles.quickLogLabel}>Water: {(data.water?.liters || 0).toFixed(2)} L</Text>
+              </View>
+              <View style={styles.quickLogBtns}>
+                <QuickBtn label="+250ml" onPress={() => addWater(0.25)} />
+                <QuickBtn label="+500ml" onPress={() => addWater(0.5)} />
+                <QuickBtn label="+1L" onPress={() => addWater(1)} />
+              </View>
+            </View>
+          </View>
+          <View style={styles.quickLogLabelRow}>
+            <MaterialCommunityIcons name="sleep" size={14} color={colors.purpleLight} />
+            <Text style={styles.quickLogLabel}>Sleep: {(data.sleep?.hours || 0)} h</Text>
+          </View>
+          <View style={styles.quickLogBtns}>
+            {[6, 7, 8, 9].map((h) => (
+              <QuickBtn key={h} label={`${h}h`} onPress={() => logSleep(h)} active={data.sleep?.hours === h} />
+            ))}
+          </View>
+        </Card>
+
         {/* Transformation progress */}
         {body && (
           <Card style={{ marginTop: spacing.md }}>
@@ -189,6 +234,14 @@ function TransformStat({ label, value, color = colors.text }) {
   );
 }
 
+function QuickBtn({ label, onPress, active }) {
+  return (
+    <TouchableOpacity onPress={onPress} style={[styles.quickBtn, active && styles.quickBtnActive]}>
+      <Text style={[styles.quickBtnText, active && { color: colors.purpleLight }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: spacing.lg },
@@ -220,4 +273,12 @@ const styles = StyleSheet.create({
   transformRow: { flexDirection: 'row' },
   transformLabel: { color: colors.textMuted, fontSize: font.tiny },
   transformValue: { fontSize: font.h3, fontWeight: '800', marginTop: 2 },
+  quickLogRow: { flexDirection: 'row' },
+  quickLogCol: { flex: 1 },
+  quickLogLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.sm, marginBottom: 6 },
+  quickLogLabel: { color: colors.textDim, fontSize: font.small, fontWeight: '600' },
+  quickLogBtns: { flexDirection: 'row', gap: 6 },
+  quickBtn: { flex: 1, paddingVertical: 8, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgDarker, alignItems: 'center' },
+  quickBtnActive: { borderColor: colors.purple, backgroundColor: `${colors.purple}18` },
+  quickBtnText: { color: colors.textDim, fontSize: font.tiny, fontWeight: '700' },
 });

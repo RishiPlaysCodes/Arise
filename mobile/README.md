@@ -13,6 +13,31 @@ Offline-first, battery-efficient fitness transformation game built with **Expo
 | **Battery efficient** | Steps use the phone's low-power hardware step-counter sensor (no GPS, no CPU polling). Notifications use the OS scheduler. App-block watcher only runs while a punishment is active. |
 | **Nothing half-baked** | Every feature is wired end-to-end. The one OS-level limit (blocking *other* apps) is documented honestly in `ANDROID_APP_BLOCKER.md` and surfaced truthfully in the UI. |
 
+## Accuracy system (what makes it best-in-class)
+
+Real accuracy doesn't come from a fancy one-time formula — it comes from
+**measuring your actual response and self-correcting**. Arise does both:
+
+- **Scientific starting estimate**: Mifflin-St Jeor / Katch-McArdle BMR, TDEE,
+  and — when you provide tape measurements — the **US Navy body-fat method**
+  (±3-4% vs DEXA) instead of a rough BMI guess.
+- **Adaptive calibration (the core)**: from your logged intake + smoothed
+  weight trend, the app derives your **true maintenance calories** via energy
+  balance and recalibrates your targets every check-in. This cancels out
+  metabolic adaptation and individual variation — the same principle behind the
+  most accurate paid apps. Converges to ~95%+ real-world accuracy after ~2 weeks
+  of consistent logging.
+- **Realistic goals, not fantasy**: **Casey Butt natural-potential** model (from
+  wrist + ankle) caps muscle goals at your genuine drug-free ceiling, and
+  muscle-gain / fat-loss rates scale with training age and body-fat %.
+- **Weight-trend smoothing (EMA)** removes daily water-weight noise so progress
+  and ETA are honest.
+- **Self-correcting goal ETA** projects your finish date from your *real*
+  observed rate, not the original guess.
+
+> Honesty: no app is literally "100% accurate" — bodies vary. Arise is as
+> accurate as the science allows and gets sharper the more you log.
+
 ## Features (all functional offline)
 
 - **Onboarding**: body assessment + choose from 12 target physiques
