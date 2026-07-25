@@ -1,0 +1,19 @@
+{
+  "name": "solo-levelling-game",
+  "version": "1.0.0",
+  "description": "Enterprise-level Solo Leveling inspired fitness transformation system - Arise and become the strongest version of yourself",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd server && node index.js",
+    "client": "cd client && npm run dev",
+    "build": "cd client && npm run build",
+    "start": "node server/index.js",
+    "setup": "npm install && cd server && npm install && cd ../client && npm install"
+  },
+  "keywords": ["solo-leveling", "fitness", "transformation", "game", "health"],
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-sl-dark text-white min-h-screen;
+    font-family: 'Inter', sans-serif;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-sl-darker;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-sl-purple-dark rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-sl-purple;
+  }
+}
+
+@layer components {
+  .sl-card {
+    @apply bg-sl-panel border border-sl-border rounded-xl p-6 shadow-sl transition-all duration-300;
+  }
+
+  .sl-card:hover {
+    @apply border-sl-purple/50 shadow-sl-lg;
+  }
+
+  .sl-button {
+    @apply bg-gradient-to-r from-sl-purple to-sl-blue px-6 py-3 rounded-lg font-semibold text-white 
+           hover:from-sl-purple-dark hover:to-sl-blue transition-all duration-300 
+           shadow-sl hover:shadow-sl-lg active:scale-95;
+  }
+
+  .sl-button-danger {
+    @apply bg-gradient-to-r from-red-600 to-red-800 px-6 py-3 rounded-lg font-semibold text-white 
+           hover:from-red-700 hover:to-red-900 transition-all duration-300 active:scale-95;
+  }
+
+  .sl-input {
+    @apply bg-sl-darker border border-sl-border rounded-lg px-4 py-3 text-white 
+           focus:outline-none focus:border-sl-purple focus:ring-1 focus:ring-sl-purple
+           placeholder-gray-500 transition-all duration-200 w-full;
+  }
+
+  .sl-select {
+    @apply bg-sl-darker border border-sl-border rounded-lg px-4 py-3 text-white 
+           focus:outline-none focus:border-sl-purple appearance-none cursor-pointer w-full;
+  }
+
+  .sl-badge {
+    @apply inline-flex items-center px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider;
+  }
+
+  .sl-progress-bar {
+    @apply h-3 bg-sl-darker rounded-full overflow-hidden;
+  }
+
+  .sl-progress-fill {
+    @apply h-full rounded-full transition-all duration-500 ease-out;
+  }
+
+  .rank-E { @apply text-gray-400; }
+  .rank-D { @apply text-green-400; }
+  .rank-C { @apply text-blue-400; }
+  .rank-B { @apply text-purple-400; }
+  .rank-A { @apply text-orange-400; }
+  .rank-S { @apply text-red-500; }
+  .rank-SS { @apply text-yellow-300; }
+
+  .glow-text {
+    text-shadow: 0 0 10px currentColor, 0 0 20px currentColor;
+  }
+
+  .quest-card {
+    @apply sl-card relative overflow-hidden;
+  }
+
+  .quest-card::before {
+    content: '';
+    @apply absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-sl-purple to-sl-blue;
+  }
+
+  .quest-card.completed::before {
+    @apply from-sl-green to-emerald-600;
+  }
+
+  .stat-bar {
+    @apply relative h-2 bg-sl-darker rounded-full overflow-hidden;
+  }
+
+  .stat-bar-fill {
+    @apply absolute top-0 left-0 h-full rounded-full transition-all duration-700;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-sl-purple-light to-sl-blue-glow;
+  }
+
+  .animate-in {
+    animation: fadeInUp 0.5s ease-out forwards;
+  }
+
+  @keyframes fadeInUp {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
