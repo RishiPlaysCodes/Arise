@@ -10,6 +10,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AppProvider, useApp } from './src/store/AppContext';
 import { colors } from './src/theme/theme';
 import { Loader } from './src/components/ui';
+import { BrandMark } from './src/components/Logo';
 import LevelUpModal from './src/components/LevelUpModal';
 import LockdownOverlay from './src/components/LockdownOverlay';
 import AchievementModal from './src/components/AchievementModal';
@@ -105,6 +106,8 @@ function Root() {
   if (booting || !ready) {
     return (
       <View style={styles.center}>
+        <BrandMark size={120} tagline="Become the strongest" />
+        <View style={{ height: 28 }} />
         <Loader label="Loading System..." />
       </View>
     );

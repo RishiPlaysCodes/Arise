@@ -7,6 +7,7 @@ import { useApp } from '../store/AppContext';
 import { colors, font, spacing, radius } from '../theme/theme';
 import { Card, GradientButton, OutlineButton, ProgressBar } from '../components/ui';
 import { BODY_TYPES, ACTIVITY_LEVELS } from '../engine/constants';
+import { Logo } from '../components/Logo';
 
 export default function OnboardingScreen() {
   const { createHunter, setupBody } = useApp();
@@ -73,10 +74,10 @@ export default function OnboardingScreen() {
 
           {step === 0 && (
             <View>
-              <LinearGradient colors={[colors.purple, colors.blue]} style={styles.logo}>
-                <MaterialCommunityIcons name="shield-crown" size={44} color={colors.white} />
-              </LinearGradient>
-              <Text style={styles.brand}>SOLO LEVELLING</Text>
+              <View style={styles.logoWrap}>
+                <Logo size={110} />
+              </View>
+              <Text style={styles.brand}>ARISE</Text>
               <Text style={styles.tagline}>Rise from the weakest to the strongest.</Text>
               <Card style={{ marginTop: spacing.xl }}>
                 <Text style={styles.label}>What shall we call you, Hunter?</Text>
@@ -292,7 +293,8 @@ const styles = StyleSheet.create({
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.border },
   dotActive: { backgroundColor: colors.purple, width: 20 },
   logo: { width: 84, height: 84, borderRadius: 22, alignItems: 'center', justifyContent: 'center', alignSelf: 'center' },
-  brand: { color: colors.purpleLight, fontSize: font.h1, fontWeight: '900', letterSpacing: 3, textAlign: 'center', marginTop: spacing.md },
+  logoWrap: { alignItems: 'center' },
+  brand: { color: colors.text, fontSize: font.h1, fontWeight: '900', letterSpacing: 8, textAlign: 'center', marginTop: spacing.sm, marginLeft: 8 },
   tagline: { color: colors.textDim, textAlign: 'center', marginTop: spacing.xs, fontSize: font.small },
   stepTitle: { color: colors.text, fontSize: font.h2, fontWeight: '900', letterSpacing: 1, textAlign: 'center' },
   stepSub: { color: colors.textDim, textAlign: 'center', marginTop: 4, fontSize: font.small },
