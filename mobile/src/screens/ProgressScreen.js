@@ -3,9 +3,12 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Refres
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'react-native';
 import { useApp } from '../store/AppContext';
 import { colors, font, spacing, radius } from '../theme/theme';
 import { Card, ScreenTitle, GradientButton, Badge } from '../components/ui';
+import LineChart from '../components/LineChart';
+import AdaptiveEngine from '../engine/adaptiveEngine';
 
 const MEASURE_FIELDS = [
   ['neck', 'Neck'], ['shoulder', 'Shoulder'], ['chest', 'Chest'], ['waist', 'Waist'],
@@ -27,16 +30,30 @@ export default function ProgressScreen() {
   const [showMeasure, setShowMeasure] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [running, setRunning] = useState(false);
+  const [weightChart, setWeightChart] = useState(null);
+  const [photos, setPhotos] = useState([]);
 
   const load = useCallback(async () => {
-    const [lc, pot, mp, ach] = await Promise.all([
+    const [lc, pot, mp, ach, weights, pics] = await Promise.all([
       repos.CheckinRepo.last(),
       repos.ProfileRepo.getNaturalPotential(),
       repos.MeasurementRepo.progress(),
       repos.AchievementRepo.unlocked(),
+      repos.ProfileRepo.getWeightHistory(120),
+      repos.PhotoRepo.all(),
     ]);
-    setLastCheckin(lc); setPotential(pot); setMeasureProgress(mp); setAchievements(ach);
+    setLastCheckin(lc); setPotential(pot); setMeasureProgress(mp); setAchievements(ach); setPhotos(pics);
     setAllAchievements(repos.AchievementRepo.allDefs());
+    if (weights && weights.length >= 2) {
+      const asc = [...weights].sort((a, b) => a.log_date.localeCompare(b.log_date));
+      const { trend } = AdaptiveEngine.weightTrend(asc);
+      setWeightChart({
+        actual: asc.map((w) => ({ label: w.log_date.slice(5), value: w.weight_kg })),
+        ema: trend.map((t) => ({ label: t.date.slice(5), value: t.ema })),
+      });
+    } else {
+      setWeightChart(null);
+    }
   }, [repos]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
@@ -59,6 +76,34 @@ export default function ProgressScreen() {
     await repos.MeasurementRepo.log(parsed);
     setForm({}); setShowMeasure(false);
     await load(); await refreshCore();
+  };
+
+  const addPhoto = async () => {
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchImageLibraryAsync({ quality: 0.6, mediaTypes: ImagePicker.MediaTypeOptions.Images });
+      if (!res.canceled && res.assets?.[0]?.uri) {
+        const body = await repos.ProfileRepo.getBody();
+        await repos.PhotoRepo.add(res.assets[0].uri, 'front', body?.current_weight_kg || null);
+        await load();
+      }
+    } catch (e) { /* picker unavailable */ }
+  };
+
+  const takePhoto = async () => {
+    try {
+      const ImagePicker = require('expo-image-picker');
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) return;
+      const res = await ImagePicker.launchCameraAsync({ quality: 0.6 });
+      if (!res.canceled && res.assets?.[0]?.uri) {
+        const body = await repos.ProfileRepo.getBody();
+        await repos.PhotoRepo.add(res.assets[0].uri, 'front', body?.current_weight_kg || null);
+        await load();
+      }
+    } catch (e) { /* camera unavailable */ }
   };
 
   const unlockedIds = new Set(achievements.map((a) => a.id));
@@ -139,6 +184,43 @@ export default function ProgressScreen() {
             </View>
           </Card>
         )}
+
+        {/* Weight trend chart */}
+        {weightChart && (
+          <Card style={{ marginTop: spacing.md }}>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="scale-bathroom" size={18} color={colors.green} />
+              <Text style={styles.cardTitle}>Weight Trend</Text>
+            </View>
+            <LineChart data={weightChart.actual} secondary={weightChart.ema} unit="kg" color={colors.blueGlow} secondaryColor={colors.green} height={170} />
+          </Card>
+        )}
+
+        {/* Progress photos */}
+        <Card style={{ marginTop: spacing.md }}>
+          <View style={styles.rowBetween}>
+            <View style={styles.cardHeader}>
+              <MaterialCommunityIcons name="camera" size={18} color={colors.purpleLight} />
+              <Text style={styles.cardTitle}>Progress Photos</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TouchableOpacity onPress={takePhoto} style={styles.miniBtn}><MaterialCommunityIcons name="camera" size={16} color={colors.white} /></TouchableOpacity>
+              <TouchableOpacity onPress={addPhoto} style={styles.miniBtn}><MaterialCommunityIcons name="image-plus" size={16} color={colors.white} /></TouchableOpacity>
+            </View>
+          </View>
+          {photos.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: spacing.sm }}>
+              {photos.map((p) => (
+                <View key={p.id} style={styles.photoWrap}>
+                  <Image source={{ uri: p.uri }} style={styles.photo} />
+                  <Text style={styles.photoDate}>{p.log_date.slice(5)}{p.weight_kg ? ` · ${p.weight_kg}kg` : ''}</Text>
+                </View>
+              ))}
+            </ScrollView>
+          ) : (
+            <Text style={styles.hint}>Add photos to visually track your transformation. Stored only on your device.</Text>
+          )}
+        </Card>
 
         {/* Measurements */}
         <Card style={{ marginTop: spacing.md }}>
@@ -248,4 +330,7 @@ const styles = StyleSheet.create({
   achChipGot: { opacity: 1, borderColor: `${colors.gold}55`, backgroundColor: `${colors.gold}0d` },
   achName: { color: colors.textDim, fontWeight: '700', fontSize: font.small, marginTop: 4 },
   achDesc: { color: colors.textMuted, fontSize: font.tiny, marginTop: 2 },
+  photoWrap: { marginRight: spacing.sm, alignItems: 'center' },
+  photo: { width: 100, height: 140, borderRadius: radius.md, backgroundColor: colors.bgDarker },
+  photoDate: { color: colors.textMuted, fontSize: font.tiny, marginTop: 4 },
 });

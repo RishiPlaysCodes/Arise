@@ -17,7 +17,7 @@ export default function OnboardingScreen() {
   const [form, setForm] = useState({
     hunterName: '', heightCm: '', currentWeightKg: '', age: '', gender: 'male',
     activityLevel: 'sedentary', targetBodyType: '', bodyFatPercentage: '',
-    experience: 'beginner',
+    experience: 'beginner', diet: 'non_veg', allergies: '',
     neck: '', waist: '', hip: '', wrist: '', ankle: '',
   });
 
@@ -46,6 +46,10 @@ export default function OnboardingScreen() {
         hipCm: num(form.hip),
         wristCm: num(form.wrist),
         ankleCm: num(form.ankle),
+        dietaryPrefs: {
+          diet: form.diet,
+          allergies: form.allergies.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+        },
       });
       setPlan(res.plan);
       setStep(4);
@@ -120,6 +124,16 @@ export default function OnboardingScreen() {
                   ))}
                 </View>
                 <Text style={styles.helper}>Sets realistic muscle-gain speed (novices gain much faster).</Text>
+
+                <Text style={[styles.label, { marginTop: spacing.md }]}>Diet Preference</Text>
+                <View style={styles.dietWrap}>
+                  {[['non_veg', 'Non-Veg'], ['eggetarian', 'Egg'], ['veg', 'Veg'], ['vegan', 'Vegan']].map(([k, l]) => (
+                    <TouchableOpacity key={k} onPress={() => set('diet', k)} style={[styles.dietChip, form.diet === k && styles.chipActive]}>
+                      <Text style={[styles.chipText, form.diet === k && { color: colors.purpleLight }]}>{l}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Field label="Allergies (comma separated, optional)" value={form.allergies} onChange={(v) => set('allergies', v)} placeholder="e.g. nuts, dairy, soy" />
 
                 {/* Optional precision data */}
                 <View style={styles.precisionHead}>
@@ -312,4 +326,6 @@ const styles = StyleSheet.create({
   miniField: { width: '30%', flexGrow: 1 },
   miniLabel: { color: colors.textMuted, fontSize: font.tiny, marginBottom: 3 },
   miniInput: { backgroundColor: colors.bgDarker, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, paddingHorizontal: spacing.sm, paddingVertical: 8, color: colors.text },
+  dietWrap: { flexDirection: 'row', gap: 6, marginBottom: spacing.sm },
+  dietChip: { flex: 1, paddingVertical: 10, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, alignItems: 'center', backgroundColor: colors.bgDarker },
 });

@@ -8,10 +8,12 @@ import {
   ProfileRepo, QuestRepo, DietRepo, StepRepo, ActivityRepo,
   CombatRepo, PunishmentRepo, DayProcessor,
   MeasurementRepo, CheckinRepo, WaterRepo, SleepRepo, SettingsRepo, AchievementRepo,
+  StrengthRepo, PhotoRepo, ExportRepo,
 } from '../db/repositories';
 import PedometerService from '../services/pedometer';
 import NotificationService from '../services/notifications';
 import SyncService from '../services/sync';
+import BackgroundTasks from '../services/backgroundTasks';
 
 const AppContext = createContext(null);
 
@@ -92,7 +94,11 @@ export function AppProvider({ children }) {
     setPedometerAvailable(available);
     if (available && p && b) {
       await PedometerService.start();
+      await PedometerService.syncHistorical().catch(() => {});
     }
+
+    // Register OS background upkeep (steps sync + day catch-up + sync flush)
+    if (p && b) BackgroundTasks.register().catch(() => {});
 
     // Best-effort background sync (no-op if disabled/offline)
     SyncService.pushQueue().catch(() => {});
@@ -128,8 +134,9 @@ export function AppProvider({ children }) {
     repos: {
       ProfileRepo, QuestRepo, DietRepo, StepRepo, ActivityRepo, CombatRepo, PunishmentRepo, DayProcessor,
       MeasurementRepo, CheckinRepo, WaterRepo, SleepRepo, SettingsRepo, AchievementRepo,
+      StrengthRepo, PhotoRepo, ExportRepo,
     },
-    services: { PedometerService, NotificationService, SyncService },
+    services: { PedometerService, NotificationService, SyncService, BackgroundTasks },
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

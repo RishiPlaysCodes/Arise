@@ -7,6 +7,7 @@ import { useApp } from '../store/AppContext';
 import { colors, font, spacing, radius } from '../theme/theme';
 import { Card, ProgressBar, ScreenTitle, GradientButton, Badge } from '../components/ui';
 import { searchFoods, scaleFood, defaultServing } from '../data/foods';
+import BarcodeScanner from '../components/BarcodeScanner';
 
 const MEALS = ['breakfast', 'lunch', 'snack', 'dinner'];
 
@@ -20,6 +21,9 @@ export default function DietScreen() {
   const [foodQuery, setFoodQuery] = useState('');
   const [grams, setGrams] = useState('');
   const [selectedFood, setSelectedFood] = useState(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannedFood, setScannedFood] = useState(null);
+  const [scannedGrams, setScannedGrams] = useState('100');
   const foodResults = searchFoods(foodQuery, 12);
 
   const load = useCallback(async () => {
@@ -116,10 +120,26 @@ export default function DietScreen() {
               </TouchableOpacity>
             ))}
           </View>
-          <TextInput
-            style={styles.input} placeholder="Search foods (e.g. chicken, rice, banana)"
-            placeholderTextColor={colors.textMuted} value={foodQuery} onChangeText={(v) => { setFoodQuery(v); setSelectedFood(null); }}
-          />
+          <View style={styles.searchRow}>
+            <TextInput
+              style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="Search foods (e.g. chicken, rice, banana)"
+              placeholderTextColor={colors.textMuted} value={foodQuery} onChangeText={(v) => { setFoodQuery(v); setSelectedFood(null); }}
+            />
+            <TouchableOpacity onPress={() => setShowScanner(true)} style={styles.scanBtn}>
+              <MaterialCommunityIcons name="barcode-scan" size={22} color={colors.white} />
+            </TouchableOpacity>
+          </View>
+
+          {scannedFood && (
+            <View style={styles.scannedBox}>
+              <Text style={styles.scannedName}>{scannedFood.name}</Text>
+              <Text style={styles.foodMacros}>{scannedFood.cal}cal · P{scannedFood.p} · C{scannedFood.c} · F{scannedFood.f} /100g</Text>
+              <View style={styles.gramsRow}>
+                <TextInput style={styles.gramsInput} keyboardType="numeric" value={scannedGrams} onChangeText={setScannedGrams} placeholder="grams" placeholderTextColor={colors.textMuted} />
+                <GradientButton title="Add" colors={[colors.green, colors.emerald]} onPress={() => { quickAddFood(scannedFood, parseFloat(scannedGrams) || 100); setScannedFood(null); }} />
+              </View>
+            </View>
+          )}
           {foodQuery.length > 0 && (
             <View style={styles.foodResults}>
               {foodResults.map((food, i) => {
@@ -192,6 +212,12 @@ export default function DietScreen() {
         )}
         <View style={{ height: spacing.xl }} />
       </ScrollView>
+
+      <BarcodeScanner
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        onResolved={(food) => { setScannedFood(food); setScannedGrams('100'); setFoodQuery(''); }}
+      />
     </SafeAreaView>
   );
 }
@@ -239,6 +265,10 @@ const styles = StyleSheet.create({
   foodMacros: { color: colors.textMuted, fontSize: font.tiny, marginTop: 2 },
   gramsRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center', paddingVertical: spacing.sm },
   gramsInput: { flex: 1, backgroundColor: colors.bgDarker, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, color: colors.text },
+  searchRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+  scanBtn: { width: 46, height: 46, borderRadius: radius.md, backgroundColor: colors.purple, alignItems: 'center', justifyContent: 'center' },
+  scannedBox: { marginTop: spacing.sm, padding: spacing.md, backgroundColor: `${colors.green}0d`, borderRadius: radius.md, borderWidth: 1, borderColor: `${colors.green}33` },
+  scannedName: { color: colors.text, fontWeight: '700', fontSize: font.small },
   planRow: { paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
   planHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   planTime: { color: colors.textMuted, fontSize: font.tiny },

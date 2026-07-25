@@ -24,6 +24,32 @@ import { NativeModules, Platform, Linking } from 'react-native';
 
 const NativeAppBlocker = NativeModules.SoloAppBlocker || null;
 
+// Friendly name -> Android package name(s). Extend as needed.
+export const PACKAGE_MAP = {
+  Instagram: ['com.instagram.android'],
+  'Twitter/X': ['com.twitter.android'],
+  Facebook: ['com.facebook.katana'],
+  TikTok: ['com.zhiliaoapp.musically', 'com.ss.android.ugc.trill'],
+  Snapchat: ['com.snapchat.android'],
+  Reddit: ['com.reddit.frontpage'],
+  YouTube: ['com.google.android.youtube'],
+  Netflix: ['com.netflix.mediaclient'],
+  'Disney+': ['com.disney.disneyplus'],
+  'Prime Video': ['com.amazon.avod.thirdpartyclient'],
+  Spotify: ['com.spotify.music'],
+  Games: [],
+  Twitch: ['tv.twitch.android.app'],
+};
+
+export function toPackageNames(friendlyNames) {
+  const out = [];
+  for (const n of friendlyNames) {
+    const pkgs = PACKAGE_MAP[n];
+    if (pkgs) out.push(...pkgs);
+  }
+  return out;
+}
+
 export const AppBlockerService = {
   // Reports the REAL enforcement level available right now.
   async getCapability() {

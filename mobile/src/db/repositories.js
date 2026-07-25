@@ -406,12 +406,29 @@ export const DietRepo = {
   async mealPlan() {
     const body = await ProfileRepo.getBody();
     if (!body) return null;
+    let prefs = {};
+    try {
+      const raw = body.dietary_prefs ? JSON.parse(body.dietary_prefs) : [];
+      // dietary_prefs stored as ['diet:veg','allergy:nuts',...] or {diet, allergies}
+      if (Array.isArray(raw)) {
+        const diet = raw.find((x) => typeof x === 'string' && x.startsWith('diet:'));
+        prefs.diet = diet ? diet.split(':')[1] : 'non_veg';
+        prefs.allergies = raw.filter((x) => typeof x === 'string' && x.startsWith('allergy:')).map((x) => x.split(':')[1]);
+      } else if (raw && typeof raw === 'object') {
+        prefs = raw;
+      }
+    } catch { prefs = {}; }
+    const dietPref = await SettingsRepo.get('diet_pref', null);
+    if (dietPref) prefs.diet = dietPref;
+    const allergyPref = await SettingsRepo.get('allergies', null);
+    if (allergyPref) prefs.allergies = allergyPref.split(',').map((s) => s.trim()).filter(Boolean);
+
     const meals = TransformationEngine.generateMealPlan({
       dailyCalories: body.daily_calories, protein: body.protein_g,
       carbs: body.carbs_g, fats: body.fats_g,
-    });
+    }, prefs);
     return {
-      meals,
+      meals, prefs,
       totalCalories: meals.reduce((s, m) => s + m.calories, 0),
       totalProtein: meals.reduce((s, m) => s + m.protein, 0),
     };
@@ -651,6 +668,14 @@ export const PunishmentRepo = {
     for (const a of apps) {
       await db.runAsync('INSERT INTO blocked_apps (id, app_name, blocked_until, is_active) VALUES (?,?,?,1)', [uid(), a, until.toISOString()]);
     }
+    // If the native accessibility blocker is installed, enforce system-wide too.
+    try {
+      const AppBlockerService = require('../services/appBlocker').default;
+      const { toPackageNames } = require('../services/appBlocker');
+      if (AppBlockerService.isNativeAvailable()) {
+        await AppBlockerService.setBlockedApps(toPackageNames(apps), until.toISOString());
+      }
+    } catch (e) { /* native module absent — in-app lockdown still applies */ }
     return apps;
   },
 
@@ -658,6 +683,10 @@ export const PunishmentRepo = {
     const db = await getDB();
     await db.runAsync("UPDATE punishments SET is_active=0, redeemed=1 WHERE punishment_type='FULL_DEVICE_BLOCK' AND is_active=1");
     await db.runAsync('UPDATE blocked_apps SET is_active=0');
+    try {
+      const AppBlockerService = require('../services/appBlocker').default;
+      if (AppBlockerService.isNativeAvailable()) await AppBlockerService.clearBlocks();
+    } catch (e) { /* noop */ }
     return true;
   },
 
@@ -993,4 +1022,122 @@ DietRepo.dailyIntakeHistory = async function (days = 30) {
      FROM diet_logs WHERE log_date >= ? GROUP BY log_date ORDER BY log_date ASC`,
     [todayStr(start)]
   );
+};
+
+
+// ---------------------------------------------------------------------------
+// STRENGTH / 1RM TRACKING (progressive overload)
+// Epley formula: 1RM = weight * (1 + reps/30)
+// ---------------------------------------------------------------------------
+export const StrengthRepo = {
+  estimate1RM(weightKg, reps) {
+    if (!weightKg || !reps) return 0;
+    if (reps === 1) return Math.round(weightKg * 10) / 10;
+    return Math.round(weightKg * (1 + reps / 30) * 10) / 10;
+  },
+
+  async log({ exercise, sets, reps, weightKg, notes }) {
+    const db = await getDB();
+    const oneRm = this.estimate1RM(weightKg, reps);
+    await db.runAsync(
+      `INSERT INTO strength_logs (id, log_date, exercise, sets, reps, weight_kg, estimated_1rm, notes)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [uid(), todayStr(), exercise, sets || 1, reps || 1, weightKg || 0, oneRm, notes || '']
+    );
+    // Log as an activity so it counts toward exercise quests.
+    const rewards = await QuestRepo.syncCategory('exercise', (q) => {
+      if (q.unit === 'session') return { value: q.target_value };
+      return {};
+    });
+    return { estimated1RM: oneRm, rewards };
+  },
+
+  async history(exercise = null, limit = 100) {
+    const db = await getDB();
+    if (exercise) {
+      return db.getAllAsync('SELECT * FROM strength_logs WHERE exercise = ? ORDER BY log_date DESC, created_at DESC LIMIT ?', [exercise, limit]);
+    }
+    return db.getAllAsync('SELECT * FROM strength_logs ORDER BY created_at DESC LIMIT ?', [limit]);
+  },
+
+  async exercises() {
+    const db = await getDB();
+    const rows = await db.getAllAsync('SELECT DISTINCT exercise FROM strength_logs ORDER BY exercise ASC');
+    return rows.map((r) => r.exercise);
+  },
+
+  // Personal records per exercise (max estimated 1RM + best set).
+  async personalRecords() {
+    const db = await getDB();
+    return db.getAllAsync(
+      `SELECT exercise, MAX(estimated_1rm) as best_1rm, MAX(weight_kg) as top_weight, COUNT(*) as sessions
+       FROM strength_logs GROUP BY exercise ORDER BY best_1rm DESC`
+    );
+  },
+
+  // 1RM progression over time for a given exercise (for charts).
+  async progression(exercise) {
+    const db = await getDB();
+    return db.getAllAsync(
+      `SELECT log_date, MAX(estimated_1rm) as one_rm FROM strength_logs
+       WHERE exercise = ? GROUP BY log_date ORDER BY log_date ASC`, [exercise]
+    );
+  },
+};
+
+// ---------------------------------------------------------------------------
+// PROGRESS PHOTOS (local URIs; never uploaded unless user enables sync)
+// ---------------------------------------------------------------------------
+export const PhotoRepo = {
+  async add(uri, pose = 'front', weightKg = null) {
+    const db = await getDB();
+    await db.runAsync(
+      'INSERT INTO progress_photos (id, log_date, uri, pose, weight_kg) VALUES (?,?,?,?,?)',
+      [uid(), todayStr(), uri, pose, weightKg]
+    );
+  },
+  async all() {
+    const db = await getDB();
+    return db.getAllAsync('SELECT * FROM progress_photos ORDER BY log_date DESC, created_at DESC');
+  },
+  async remove(id) {
+    const db = await getDB();
+    await db.runAsync('DELETE FROM progress_photos WHERE id = ?', [id]);
+  },
+};
+
+// ---------------------------------------------------------------------------
+// EXPORT - dump all user data to CSV/JSON strings (offline, no upload)
+// ---------------------------------------------------------------------------
+export const ExportRepo = {
+  async allData() {
+    const db = await getDB();
+    const tables = ['player_profile', 'body_profile', 'player_stats', 'daily_quests',
+      'diet_logs', 'step_logs', 'activity_logs', 'combat_training', 'weight_history',
+      'body_measurements', 'checkins', 'strength_logs', 'sleep_logs', 'water_logs', 'achievements'];
+    const out = {};
+    for (const t of tables) {
+      out[t] = await db.getAllAsync(`SELECT * FROM ${t}`);
+    }
+    return out;
+  },
+
+  toCSV(rows) {
+    if (!rows || rows.length === 0) return '';
+    const headers = Object.keys(rows[0]);
+    const escape = (v) => {
+      if (v == null) return '';
+      const s = String(v).replace(/"/g, '""');
+      return /[",\n]/.test(s) ? `"${s}"` : s;
+    };
+    const lines = [headers.join(',')];
+    for (const r of rows) lines.push(headers.map((h) => escape(r[h])).join(','));
+    return lines.join('\n');
+  },
+
+  async weightHistoryCSV() {
+    const db = await getDB();
+    const rows = await db.getAllAsync('SELECT log_date, weight_kg, body_fat_percentage FROM weight_history ORDER BY log_date ASC');
+    return this.toCSV(rows);
+  },
 };

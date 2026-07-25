@@ -248,6 +248,18 @@ function initializeDatabase() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS sync_data (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      entity TEXT NOT NULL,
+      op TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      client_ts DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sync_user ON sync_data(user_id, entity);
     CREATE INDEX IF NOT EXISTS idx_daily_quests_user_date ON daily_quests(user_id, quest_date);
     CREATE INDEX IF NOT EXISTS idx_diet_logs_user_date ON diet_logs(user_id, log_date);
     CREATE INDEX IF NOT EXISTS idx_step_logs_user_date ON step_logs(user_id, log_date);

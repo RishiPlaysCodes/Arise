@@ -235,37 +235,67 @@ export const TransformationEngine = {
     return p;
   },
 
-  generateMealPlan(nutrition) {
+  // prefs: { diet: 'non_veg'|'eggetarian'|'veg'|'vegan', allergies: string[] }
+  // Each template tagged with `tags` for dietary filtering. `diet` selects the
+  // maximum-permissiveness pool: non_veg > eggetarian > veg > vegan.
+  generateMealPlan(nutrition, prefs = {}) {
     const { dailyCalories } = nutrition;
+    const diet = prefs.diet || 'non_veg';
+    const allergies = (prefs.allergies || []).map((a) => a.toLowerCase());
     const dist = [0.25, 0.30, 0.15, 0.30];
+
+    // tag legend: vegan (⊂ veg ⊂ eggetarian ⊂ non_veg), egg, dairy, fish, meat, nuts, gluten
     const templates = {
       breakfast: [
-        { name: 'Protein Oats Power Bowl', b: { cal: 450, p: 35, c: 55, f: 12 } },
-        { name: 'Egg White & Avocado Toast', b: { cal: 400, p: 30, c: 40, f: 15 } },
-        { name: 'Greek Yogurt Parfait + Nuts', b: { cal: 380, p: 32, c: 42, f: 10 } },
-        { name: 'Protein Pancakes + Berries', b: { cal: 440, p: 38, c: 50, f: 10 } },
+        { name: 'Protein Oats Power Bowl', tags: ['veg', 'dairy'], allergens: ['dairy', 'gluten'], b: { cal: 450, p: 35, c: 55, f: 12 } },
+        { name: 'Egg White & Avocado Toast', tags: ['eggetarian', 'egg'], allergens: ['egg', 'gluten'], b: { cal: 400, p: 30, c: 40, f: 15 } },
+        { name: 'Greek Yogurt Parfait + Nuts', tags: ['veg', 'dairy'], allergens: ['dairy', 'nuts'], b: { cal: 380, p: 32, c: 42, f: 10 } },
+        { name: 'Tofu Scramble + Toast', tags: ['vegan'], allergens: ['soy', 'gluten'], b: { cal: 400, p: 28, c: 42, f: 14 } },
+        { name: 'Vegan Protein Smoothie + Oats', tags: ['vegan'], allergens: ['gluten'], b: { cal: 420, p: 34, c: 50, f: 10 } },
+        { name: 'Paneer Bhurji + Roti', tags: ['veg', 'dairy'], allergens: ['dairy', 'gluten'], b: { cal: 440, p: 30, c: 40, f: 16 } },
       ],
       lunch: [
-        { name: 'Grilled Chicken Rice Bowl', b: { cal: 550, p: 45, c: 60, f: 12 } },
-        { name: 'Salmon & Quinoa Salad', b: { cal: 520, p: 40, c: 45, f: 18 } },
-        { name: 'Lean Beef Burrito Bowl', b: { cal: 560, p: 43, c: 55, f: 16 } },
-        { name: 'Tuna Steak + Sweet Potato', b: { cal: 500, p: 45, c: 50, f: 10 } },
+        { name: 'Grilled Chicken Rice Bowl', tags: ['non_veg', 'meat'], allergens: [], b: { cal: 550, p: 45, c: 60, f: 12 } },
+        { name: 'Salmon & Quinoa Salad', tags: ['non_veg', 'fish'], allergens: ['fish'], b: { cal: 520, p: 40, c: 45, f: 18 } },
+        { name: 'Rajma Chawal (Kidney Beans + Rice)', tags: ['vegan'], allergens: [], b: { cal: 520, p: 20, c: 80, f: 10 } },
+        { name: 'Paneer Rice Bowl', tags: ['veg', 'dairy'], allergens: ['dairy'], b: { cal: 540, p: 30, c: 58, f: 18 } },
+        { name: 'Chickpea & Quinoa Buddha Bowl', tags: ['vegan'], allergens: [], b: { cal: 500, p: 22, c: 70, f: 12 } },
+        { name: 'Egg Fried Rice', tags: ['eggetarian', 'egg'], allergens: ['egg'], b: { cal: 520, p: 26, c: 62, f: 16 } },
       ],
       snack: [
-        { name: 'Protein Shake + Almonds', b: { cal: 300, p: 35, c: 15, f: 12 } },
-        { name: 'Cottage Cheese & Fruit', b: { cal: 250, p: 28, c: 22, f: 6 } },
-        { name: 'Boiled Eggs & Hummus', b: { cal: 270, p: 22, c: 15, f: 14 } },
+        { name: 'Whey Shake + Almonds', tags: ['veg', 'dairy'], allergens: ['dairy', 'nuts'], b: { cal: 300, p: 35, c: 15, f: 12 } },
+        { name: 'Cottage Cheese & Fruit', tags: ['veg', 'dairy'], allergens: ['dairy'], b: { cal: 250, p: 28, c: 22, f: 6 } },
+        { name: 'Boiled Eggs & Hummus', tags: ['eggetarian', 'egg'], allergens: ['egg'], b: { cal: 270, p: 22, c: 15, f: 14 } },
+        { name: 'Roasted Chana + Peanuts', tags: ['vegan'], allergens: ['nuts'], b: { cal: 280, p: 16, c: 30, f: 12 } },
+        { name: 'Soy Yogurt + Berries', tags: ['vegan'], allergens: ['soy'], b: { cal: 240, p: 18, c: 26, f: 6 } },
       ],
       dinner: [
-        { name: 'Herb Chicken & Veggies', b: { cal: 500, p: 48, c: 35, f: 14 } },
-        { name: 'Grilled Fish + Brown Rice', b: { cal: 480, p: 42, c: 45, f: 12 } },
-        { name: 'Lean Steak + Roasted Veg', b: { cal: 550, p: 50, c: 30, f: 20 } },
-        { name: 'Baked Salmon + Asparagus', b: { cal: 490, p: 44, c: 25, f: 18 } },
+        { name: 'Herb Chicken & Veggies', tags: ['non_veg', 'meat'], allergens: [], b: { cal: 500, p: 48, c: 35, f: 14 } },
+        { name: 'Grilled Fish + Brown Rice', tags: ['non_veg', 'fish'], allergens: ['fish'], b: { cal: 480, p: 42, c: 45, f: 12 } },
+        { name: 'Tofu Stir-Fry + Noodles', tags: ['vegan'], allergens: ['soy', 'gluten'], b: { cal: 470, p: 30, c: 55, f: 12 } },
+        { name: 'Dal + Paneer + Roti', tags: ['veg', 'dairy'], allergens: ['dairy', 'gluten'], b: { cal: 520, p: 32, c: 50, f: 16 } },
+        { name: 'Lentil & Vegetable Curry + Rice', tags: ['vegan'], allergens: [], b: { cal: 490, p: 22, c: 72, f: 10 } },
+        { name: 'Egg Curry + Rice', tags: ['eggetarian', 'egg'], allergens: ['egg'], b: { cal: 500, p: 28, c: 52, f: 18 } },
       ],
     };
+
+    const rank = { non_veg: 4, eggetarian: 3, veg: 2, vegan: 1 };
+    const allowed = rank[diet] || 4;
+    const tagRank = (tags) => {
+      if (tags.includes('vegan')) return 1;
+      if (tags.includes('veg')) return 2;
+      if (tags.includes('eggetarian')) return 3;
+      return 4; // non_veg
+    };
+
     const times = { breakfast: '7:00 AM', lunch: '12:30 PM', snack: '4:00 PM', dinner: '7:30 PM' };
     return ['breakfast', 'lunch', 'snack', 'dinner'].map((type, i) => {
-      const opts = templates[type];
+      let opts = templates[type].filter((m) => tagRank(m.tags) <= allowed);
+      if (allergies.length) {
+        const safe = opts.filter((m) => !m.allergens.some((a) => allergies.includes(a)));
+        if (safe.length) opts = safe;
+      }
+      if (opts.length === 0) opts = templates[type]; // safety fallback
       const sel = opts[Math.floor(Math.random() * opts.length)];
       const scale = (dailyCalories * dist[i]) / sel.b.cal;
       return {

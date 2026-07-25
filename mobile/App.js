@@ -12,6 +12,7 @@ import { colors } from './src/theme/theme';
 import { Loader } from './src/components/ui';
 import LevelUpModal from './src/components/LevelUpModal';
 import LockdownOverlay from './src/components/LockdownOverlay';
+import AchievementModal from './src/components/AchievementModal';
 
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -22,9 +23,14 @@ import CombatScreen from './src/screens/CombatScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import SystemScreen from './src/screens/SystemScreen';
 import ProgressScreen from './src/screens/ProgressScreen';
+import MoreScreen from './src/screens/MoreScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import StrengthScreen from './src/screens/StrengthScreen';
+import PaywallScreen from './src/screens/PaywallScreen';
 
 const Tab = createBottomTabNavigator();
-const Stack = createNativeStackNavigator();
+const RootStack = createNativeStackNavigator();
+const MainStack = createNativeStackNavigator();
 
 const navTheme = {
   ...DefaultTheme,
@@ -37,10 +43,8 @@ const ICONS = {
   Quests: 'sword-cross',
   Diet: 'food-apple',
   Steps: 'shoe-print',
-  Combat: 'boxing-glove',
   Progress: 'chart-line-variant',
-  System: 'skull',
-  Profile: 'account',
+  More: 'dots-horizontal',
 };
 
 function MainTabs() {
@@ -67,16 +71,28 @@ function MainTabs() {
       <Tab.Screen name="Quests" component={QuestsScreen} />
       <Tab.Screen name="Diet" component={DietScreen} />
       <Tab.Screen name="Steps" component={StepsScreen} />
-      <Tab.Screen name="Combat" component={CombatScreen} />
       <Tab.Screen name="Progress" component={ProgressScreen} />
-      <Tab.Screen name="System" component={SystemScreen} />
-      <Tab.Screen name="Profile" component={ProfileScreen} />
+      <Tab.Screen name="More" component={MoreScreen} />
     </Tab.Navigator>
   );
 }
 
+function MainNavigator() {
+  return (
+    <MainStack.Navigator screenOptions={{ headerShown: false }}>
+      <MainStack.Screen name="Tabs" component={MainTabs} />
+      <MainStack.Screen name="Combat" component={CombatScreen} />
+      <MainStack.Screen name="System" component={SystemScreen} />
+      <MainStack.Screen name="Profile" component={ProfileScreen} />
+      <MainStack.Screen name="Strength" component={StrengthScreen} />
+      <MainStack.Screen name="Settings" component={SettingsScreen} />
+      <MainStack.Screen name="Paywall" component={PaywallScreen} />
+    </MainStack.Navigator>
+  );
+}
+
 function Root() {
-  const { ready, profile, body, bootstrap, pendingLevelUp, clearLevelUp, punishmentStatus } = useApp();
+  const { ready, profile, body, bootstrap, pendingLevelUp, clearLevelUp, punishmentStatus, newAchievements, clearAchievements } = useApp();
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
@@ -98,16 +114,20 @@ function Root() {
 
   return (
     <>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <RootStack.Navigator screenOptions={{ headerShown: false }}>
         {!onboarded ? (
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+          <RootStack.Screen name="Onboarding" component={OnboardingScreen} />
         ) : (
-          <Stack.Screen name="Main" component={MainTabs} />
+          <RootStack.Screen name="Main" component={MainNavigator} />
         )}
-      </Stack.Navigator>
+      </RootStack.Navigator>
 
       {pendingLevelUp && (
         <LevelUpModal level={pendingLevelUp.level} rank={pendingLevelUp.rank} onClose={clearLevelUp} />
+      )}
+
+      {onboarded && newAchievements?.length > 0 && (
+        <AchievementModal achievements={newAchievements} onClose={clearAchievements} />
       )}
 
       {onboarded && punishmentStatus?.hasLockdown && <LockdownOverlay />}

@@ -24,6 +24,7 @@ app.use('/api/steps', require('./routes/steps'));
 app.use('/api/combat', require('./routes/combat'));
 app.use('/api/punishment', require('./routes/punishment'));
 app.use('/api/activity', require('./routes/activity'));
+app.use('/api/sync', require('./routes/sync'));
 
 // Health check
 app.get('/api/health', (req, res) => {

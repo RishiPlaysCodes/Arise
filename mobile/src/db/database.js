@@ -233,6 +233,20 @@ export async function initDatabase() {
       last_updated TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS strength_logs (
+      id TEXT PRIMARY KEY,
+      log_date TEXT NOT NULL,
+      exercise TEXT NOT NULL,
+      sets INTEGER DEFAULT 1,
+      reps INTEGER DEFAULT 1,
+      weight_kg REAL DEFAULT 0,
+      estimated_1rm REAL DEFAULT 0,
+      notes TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_strength_ex ON strength_logs(exercise, log_date);
+
     CREATE INDEX IF NOT EXISTS idx_quests_date ON daily_quests(quest_date);
     CREATE INDEX IF NOT EXISTS idx_diet_date ON diet_logs(log_date);
     CREATE INDEX IF NOT EXISTS idx_activity_date ON activity_logs(log_date);
@@ -291,6 +305,7 @@ export async function resetDatabase() {
     DELETE FROM weight_history; DELETE FROM achievements; DELETE FROM day_processed;
     DELETE FROM sync_queue; DELETE FROM body_measurements; DELETE FROM checkins;
     DELETE FROM progress_photos; DELETE FROM settings; DELETE FROM sleep_logs; DELETE FROM water_logs;
+    DELETE FROM strength_logs;
     UPDATE player_stats SET strength=10, agility=10, endurance=10,
     vitality=10, discipline=10, combat_power=10, intelligence=10, perception=10, stat_points_available=0 WHERE id=1;
   `);
