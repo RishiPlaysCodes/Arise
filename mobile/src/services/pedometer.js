@@ -1,15 +1,11 @@
 // ============================================================================
-// PEDOMETER SERVICE - Battery-efficient hardware step counting
+// PEDOMETER SERVICE - Battery-efficient, THROTTLED hardware step counting
 //
-// Uses expo-sensors Pedometer which on Android maps to the hardware
-// TYPE_STEP_COUNTER sensor. This sensor is maintained by a low-power
-// co-processor - it does NOT keep the CPU awake and does NOT use GPS,
-// so battery impact is negligible compared to accelerometer polling.
-//
-// Strategy:
-//  - watchStepCount gives step deltas since subscription start.
-//  - We persist a per-day cumulative total in SQLite.
-//  - On day rollover, we reset the day's counter but keep sensor continuity.
+// The device step sensor can fire many times per second while walking. Writing
+// to SQLite (and syncing quests/XP) on EVERY tick jams the JS thread and causes
+// "keeps stopping" / lag / race conditions. So we accumulate steps in memory
+// and FLUSH to the database at most once every few seconds (or on a big delta).
+// This keeps the UI smooth and the DB writes serialized.
 // ============================================================================
 
 import { Pedometer } from 'expo-sensors';
@@ -17,85 +13,108 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { StepRepo } from '../db/repositories';
 import { todayStr } from '../engine/constants';
 
-const KEY_SESSION_BASE = 'pedometer_session_base';
 const KEY_SESSION_DATE = 'pedometer_session_date';
+const FLUSH_MS = 6000;      // write to DB at most every 6s
+const FORCE_DELTA = 40;     // ...or immediately after +40 steps
 
 let subscription = null;
 let listeners = [];
+let dayBase = 0;            // steps already counted for today before this watch session
+let currentTotal = 0;       // dayBase + steps-since-watch-start
+let lastFlushed = 0;        // last total written to DB
+let flushTimer = null;
+let flushing = false;
 
 export const PedometerService = {
   async isAvailable() {
-    try {
-      return await Pedometer.isAvailableAsync();
-    } catch {
-      return false;
-    }
+    try { return await Pedometer.isAvailableAsync(); } catch { return false; }
   },
 
   async requestPermissions() {
     try {
       const { status } = await Pedometer.requestPermissionsAsync();
       return status === 'granted';
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   },
 
   onUpdate(cb) {
     listeners.push(cb);
-    return () => {
-      listeners = listeners.filter((l) => l !== cb);
-    };
+    return () => { listeners = listeners.filter((l) => l !== cb); };
   },
 
   _emit(data) {
-    listeners.forEach((l) => {
-      try { l(data); } catch (e) { /* noop */ }
-    });
+    listeners.forEach((l) => { try { l(data); } catch (e) { /* noop */ } });
   },
 
-  // Start watching. `watchStepCount` reports steps since the subscription began.
+  async _flush() {
+    if (flushing) return;
+    if (currentTotal === lastFlushed) return;
+    flushing = true;
+    const total = currentTotal;
+    try {
+      const saved = await StepRepo.setSteps(total);
+      lastFlushed = total;
+      this._emit(saved);
+    } catch (e) {
+      // swallow — will retry on next flush
+    } finally {
+      flushing = false;
+    }
+  },
+
+  _scheduleFlush(immediate = false) {
+    if (immediate) {
+      if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      this._flush();
+      return;
+    }
+    if (flushTimer) return; // already scheduled
+    flushTimer = setTimeout(() => {
+      flushTimer = null;
+      this._flush();
+    }, FLUSH_MS);
+  },
+
   async start() {
-    if (subscription) return;
+    if (subscription) return { already: true };
     const available = await this.isAvailable();
     if (!available) return { available: false };
-
     const granted = await this.requestPermissions();
     if (!granted) return { available: true, granted: false };
 
-    // Load today's existing steps as our accumulation base
     const todayRow = await StepRepo.today();
-    let dayBase = todayRow.steps || 0;
+    dayBase = todayRow.steps || 0;
+    currentTotal = dayBase;
+    lastFlushed = dayBase;
+    await AsyncStorage.setItem(KEY_SESSION_DATE, todayStr());
 
     subscription = Pedometer.watchStepCount(async (result) => {
-      // result.steps = steps counted since this watch subscription started
-      const nowDate = todayStr();
-      const storedDate = await AsyncStorage.getItem(KEY_SESSION_DATE);
-
-      if (storedDate !== nowDate) {
-        // Day rolled over while watching -> reset the day base
-        dayBase = 0;
-        await AsyncStorage.setItem(KEY_SESSION_DATE, nowDate);
-        await AsyncStorage.setItem(KEY_SESSION_BASE, '0');
-      }
-
-      const total = dayBase + result.steps;
-      const saved = await StepRepo.setSteps(total);
-      this._emit(saved);
+      try {
+        const sessionSteps = result?.steps || 0;
+        const nowDate = todayStr();
+        const storedDate = await AsyncStorage.getItem(KEY_SESSION_DATE);
+        if (storedDate !== nowDate) {
+          // Day rolled over mid-session: offset so today's count restarts at 0.
+          dayBase = -sessionSteps;
+          lastFlushed = 0;
+          await AsyncStorage.setItem(KEY_SESSION_DATE, nowDate);
+        }
+        currentTotal = Math.max(0, dayBase + sessionSteps);
+        // Flush now if a big jump; otherwise batch on the timer.
+        this._scheduleFlush(currentTotal - lastFlushed >= FORCE_DELTA);
+      } catch (e) { /* ignore tick errors */ }
     });
 
-    await AsyncStorage.setItem(KEY_SESSION_DATE, todayStr());
     return { available: true, granted: true };
   },
 
   stop() {
-    if (subscription) {
-      subscription.remove();
-      subscription = null;
-    }
+    if (subscription) { subscription.remove(); subscription = null; }
+    if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+    this._flush(); // persist whatever is pending
   },
 
-  // For iOS historical query (Android hardware counter doesn't support ranged history)
+  // iOS historical query (Android hardware counter has no ranged history)
   async syncHistorical() {
     try {
       const end = new Date();
@@ -105,9 +124,7 @@ export const PedometerService = {
       if (result && typeof result.steps === 'number') {
         return StepRepo.setSteps(result.steps);
       }
-    } catch {
-      // Not supported on this platform (e.g. Android) - watchStepCount handles it
-    }
+    } catch { /* unsupported (e.g. Android) */ }
     return null;
   },
 };

@@ -40,6 +40,7 @@ export function AppProvider({ children }) {
   }, []);
 
   const [newAchievements, setNewAchievements] = useState([]);
+  const lastAchCheck = useRef(0);
 
   // Handle level-up feedback surfaced from any repo action
   const handleRewards = useCallback(async (rewards) => {
@@ -49,18 +50,22 @@ export function AppProvider({ children }) {
         const info = r?.levelInfo;
         if (info?.leveledUp) {
           setPendingLevelUp({ level: info.newLevel, rank: info.newRank });
-          await NotificationService.notifyLevelUp(info.newLevel, info.newRank);
+          NotificationService.notifyLevelUp(info.newLevel, info.newRank).catch(() => {});
         }
       }
     }
-    // Evaluate achievements after any progress event
-    try {
-      const earned = await AchievementRepo.check();
-      if (earned.length) {
-        setNewAchievements(earned);
-        for (const a of earned) await NotificationService.notifyNow('Achievement Unlocked', `${a.name} — ${a.desc}`);
-      }
-    } catch (e) { /* noop */ }
+    // Evaluate achievements — throttled (max once / 8s) so it never piles up.
+    const now = Date.now();
+    if (now - lastAchCheck.current > 8000) {
+      lastAchCheck.current = now;
+      try {
+        const earned = await AchievementRepo.check();
+        if (earned.length) {
+          setNewAchievements(earned);
+          earned.forEach((a) => NotificationService.notifyNow('Achievement Unlocked', `${a.name} — ${a.desc}`).catch(() => {}));
+        }
+      } catch (e) { /* noop */ }
+    }
     await refreshCore();
   }, [refreshCore]);
 
