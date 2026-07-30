@@ -25,24 +25,29 @@ import { Platform } from 'react-native';
 export const STEP_SYNC_TASK = 'arise-step-sync';
 
 // Defined at module load so the OS can invoke it after an app restart.
-if (!TaskManager.isTaskDefined(STEP_SYNC_TASK)) {
-  TaskManager.defineTask(STEP_SYNC_TASK, async () => {
-    try {
-      // Lazy requires to avoid pulling heavy modules at registration time.
-      const { initDatabase } = require('../db/database');
-      const { DayProcessor } = require('../db/repositories');
-      const PedometerService = require('./pedometer').default;
-      const SyncService = require('./sync').default;
+// Wrapped so a missing/!ready native module can NEVER crash app startup.
+try {
+  if (TaskManager?.defineTask && !TaskManager.isTaskDefined(STEP_SYNC_TASK)) {
+    TaskManager.defineTask(STEP_SYNC_TASK, async () => {
+      try {
+        const { initDatabase } = require('../db/database');
+        const { DayProcessor } = require('../db/repositories');
+        const PedometerService = require('./pedometer').default;
+        const SyncService = require('./sync').default;
 
-      await initDatabase();
-      await PedometerService.syncHistorical().catch(() => {});
-      await DayProcessor.catchUp().catch(() => {});
-      await SyncService.pushQueue().catch(() => {});
-      return BackgroundFetch.BackgroundFetchResult.NewData;
-    } catch {
-      return BackgroundFetch.BackgroundFetchResult.Failed;
-    }
-  });
+        await initDatabase();
+        await PedometerService.syncHistorical().catch(() => {});
+        await DayProcessor.catchUp().catch(() => {});
+        await SyncService.pushQueue().catch(() => {});
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+      } catch {
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+      }
+    });
+  }
+} catch (e) {
+  // Background tasks unavailable on this device/build — app still works.
+  console.warn('[backgroundTasks] define failed:', e?.message || e);
 }
 
 export const BackgroundTasks = {

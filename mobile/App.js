@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -11,6 +11,7 @@ import { AppProvider, useApp } from './src/store/AppContext';
 import { colors } from './src/theme/theme';
 import { Loader } from './src/components/ui';
 import { BrandMark } from './src/components/Logo';
+import ErrorBoundary from './src/components/ErrorBoundary';
 import LevelUpModal from './src/components/LevelUpModal';
 import LockdownOverlay from './src/components/LockdownOverlay';
 import AchievementModal from './src/components/AchievementModal';
@@ -93,15 +94,25 @@ function MainNavigator() {
 }
 
 function Root() {
-  const { ready, profile, body, bootstrap, pendingLevelUp, clearLevelUp, punishmentStatus, newAchievements, clearAchievements } = useApp();
+  const { ready, profile, body, bootstrap, pendingLevelUp, clearLevelUp, punishmentStatus, newAchievements, clearAchievements, bootstrapError } = useApp();
   const [booting, setBooting] = useState(true);
 
   useEffect(() => {
     (async () => {
-      await bootstrap();
+      try { await bootstrap(); } catch (e) { console.warn('bootstrap error', e); }
       setBooting(false);
     })();
   }, [bootstrap]);
+
+  if (bootstrapError) {
+    return (
+      <View style={[styles.center, { padding: 24 }]}>
+        <BrandMark size={90} />
+        <Text style={{ color: colors.red, fontWeight: '800', fontSize: 16, marginTop: 24, textAlign: 'center' }}>Startup Error</Text>
+        <Text style={{ color: colors.textDim, fontSize: 13, marginTop: 8, textAlign: 'center' }}>{bootstrapError}</Text>
+      </View>
+    );
+  }
 
   if (booting || !ready) {
     return (
@@ -140,14 +151,16 @@ function Root() {
 
 export default function App() {
   return (
-    <SafeAreaProvider>
-      <AppProvider>
-        <NavigationContainer theme={navTheme}>
-          <StatusBar style="light" />
-          <Root />
-        </NavigationContainer>
-      </AppProvider>
-    </SafeAreaProvider>
+    <ErrorBoundary>
+      <SafeAreaProvider>
+        <AppProvider>
+          <NavigationContainer theme={navTheme}>
+            <StatusBar style="light" />
+            <Root />
+          </NavigationContainer>
+        </AppProvider>
+      </SafeAreaProvider>
+    </ErrorBoundary>
   );
 }
 

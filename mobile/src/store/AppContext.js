@@ -25,6 +25,7 @@ export function AppProvider({ children }) {
   const [punishmentStatus, setPunishmentStatus] = useState(null);
   const [pedometerAvailable, setPedometerAvailable] = useState(false);
   const [pendingLevelUp, setPendingLevelUp] = useState(null);
+  const [bootstrapError, setBootstrapError] = useState(null);
   const bootstrapped = useRef(false);
 
   const refreshCore = useCallback(async () => {
@@ -63,47 +64,60 @@ export function AppProvider({ children }) {
     await refreshCore();
   }, [refreshCore]);
 
+  // Run a best-effort step; never let it crash or block startup.
+  const safe = async (label, fn) => {
+    try { await fn(); } catch (e) { console.warn(`[bootstrap] ${label} failed:`, e?.message || e); }
+  };
+
   const bootstrap = useCallback(async () => {
     if (bootstrapped.current) return;
     bootstrapped.current = true;
 
-    await initDatabase();
+    // CRITICAL: the database must init. If this fails, show an error screen.
+    try {
+      await initDatabase();
+    } catch (e) {
+      setBootstrapError(`Database failed to initialize: ${e?.message || e}`);
+      setReady(true);
+      return;
+    }
 
-    // Process any missed days (offline catch-up) BEFORE generating today's quests
-    const caught = await DayProcessor.catchUp();
-    // Notify user of any punishments that were applied on catch-up
-    for (const c of caught) {
-      if (c?.punishments?.length) {
-        await NotificationService.notifyPunishment('You missed quests. Punishment applied. Open the app to see details.');
+    let p = null, b = null;
+    try {
+      p = await ProfileRepo.get();
+      b = await ProfileRepo.getBody();
+    } catch (e) {
+      console.warn('[bootstrap] profile read failed:', e?.message || e);
+    }
+
+    // Generate today's quests (important, but guarded).
+    if (p && b) await safe('quests', () => QuestRepo.ensureToday());
+
+    // Everything below is best-effort — failures must NOT block the app.
+    await safe('catchUp', async () => {
+      const caught = await DayProcessor.catchUp();
+      for (const c of caught) {
+        if (c?.punishments?.length) {
+          await safe('notifyPunish', () => NotificationService.notifyPunishment('You missed quests. Punishment applied.'));
+        }
       }
-    }
+    });
+    await safe('notifications.init', () => NotificationService.init());
+    if (p && b) await safe('notifications.schedule', () => NotificationService.scheduleDailyReminders());
 
-    const p = await ProfileRepo.get();
-    const b = await ProfileRepo.getBody();
+    await safe('pedometer', async () => {
+      const available = await PedometerService.isAvailable();
+      setPedometerAvailable(available);
+      if (available && p && b) {
+        await PedometerService.start();
+        await PedometerService.syncHistorical().catch(() => {});
+      }
+    });
 
-    // Only generate quests if fully onboarded
-    if (p && b) {
-      await QuestRepo.ensureToday();
-    }
+    if (p && b) safe('background', () => BackgroundTasks.register());
+    safe('sync', () => SyncService.pushQueue());
 
-    // Notifications + pedometer (best-effort; app works without them)
-    await NotificationService.init();
-    if (p && b) await NotificationService.scheduleDailyReminders();
-
-    const available = await PedometerService.isAvailable();
-    setPedometerAvailable(available);
-    if (available && p && b) {
-      await PedometerService.start();
-      await PedometerService.syncHistorical().catch(() => {});
-    }
-
-    // Register OS background upkeep (steps sync + day catch-up + sync flush)
-    if (p && b) BackgroundTasks.register().catch(() => {});
-
-    // Best-effort background sync (no-op if disabled/offline)
-    SyncService.pushQueue().catch(() => {});
-
-    await refreshCore();
+    await safe('refresh', () => refreshCore());
     setReady(true);
   }, [refreshCore]);
 
@@ -114,19 +128,22 @@ export function AppProvider({ children }) {
   }, [refreshCore]);
 
   const setupBody = useCallback(async (input) => {
-    const res = await ProfileRepo.setupBody(input);
-    await QuestRepo.ensureToday();
-    await NotificationService.init();
-    await NotificationService.scheduleDailyReminders();
-    const available = await PedometerService.isAvailable();
-    setPedometerAvailable(available);
-    if (available) await PedometerService.start();
+    const res = await ProfileRepo.setupBody(input);      // critical
+    await safe('quests', () => QuestRepo.ensureToday());  // important
+    await safe('notif.init', () => NotificationService.init());
+    await safe('notif.sched', () => NotificationService.scheduleDailyReminders());
+    await safe('pedometer', async () => {
+      const available = await PedometerService.isAvailable();
+      setPedometerAvailable(available);
+      if (available) await PedometerService.start();
+    });
+    await safe('bg', () => BackgroundTasks.register());
     await refreshCore();
     return res;
   }, [refreshCore]);
 
   const value = {
-    ready, profile, stats, body, punishmentStatus, pedometerAvailable,
+    ready, profile, stats, body, punishmentStatus, pedometerAvailable, bootstrapError,
     pendingLevelUp, clearLevelUp: () => setPendingLevelUp(null),
     bootstrap, refreshCore, handleRewards, createHunter, setupBody,
     newAchievements, clearAchievements: () => setNewAchievements([]),
