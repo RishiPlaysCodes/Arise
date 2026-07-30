@@ -593,23 +593,32 @@ export const CombatRepo = {
 // ---------------------------------------------------------------------------
 // PUNISHMENT
 // ---------------------------------------------------------------------------
+let _punishCleanupTs = 0;
 export const PunishmentRepo = {
-  async deactivateExpired() {
-    const db = await getDB();
-    await db.runAsync("UPDATE punishments SET is_active=0 WHERE is_active=1 AND ends_at <= datetime('now')");
-    await db.runAsync("UPDATE blocked_apps SET is_active=0 WHERE is_active=1 AND blocked_until <= datetime('now')");
+  // Tidy-up of expired flags — THROTTLED (max once/60s) so it never floods the
+  // DB with writes on every screen focus. Reads below stay correct regardless
+  // because they filter by time directly.
+  async deactivateExpired(force = false) {
+    const now = Date.now();
+    if (!force && now - _punishCleanupTs < 60000) return;
+    _punishCleanupTs = now;
+    try {
+      const db = await getDB();
+      await db.runAsync("UPDATE punishments SET is_active=0 WHERE is_active=1 AND ends_at <= datetime('now')");
+      await db.runAsync("UPDATE blocked_apps SET is_active=0 WHERE is_active=1 AND blocked_until <= datetime('now')");
+    } catch (e) { /* noop */ }
   },
 
   async getActive() {
-    await this.deactivateExpired();
+    this.deactivateExpired(); // fire-and-forget, throttled
     const db = await getDB();
-    return db.getAllAsync('SELECT * FROM punishments WHERE is_active=1 ORDER BY started_at DESC');
+    // Read-only + time-filtered = always correct, zero writes on the hot path.
+    return db.getAllAsync("SELECT * FROM punishments WHERE is_active=1 AND ends_at > datetime('now') ORDER BY started_at DESC");
   },
 
   async getBlockedApps() {
-    await this.deactivateExpired();
     const db = await getDB();
-    return db.getAllAsync('SELECT * FROM blocked_apps WHERE is_active=1 ORDER BY app_name ASC');
+    return db.getAllAsync("SELECT * FROM blocked_apps WHERE is_active=1 AND blocked_until > datetime('now') ORDER BY app_name ASC");
   },
 
   async status() {
